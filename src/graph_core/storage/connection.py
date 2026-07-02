@@ -44,7 +44,11 @@ class GraphConnectionPool:
     def start(self) -> None:
         """Initialize the underlying connection pool. Raises GraphConnectionError on failure."""
         pool = self._pool_factory()
-        ok = pool.init(self._config.hosts, _build_nebula_config(self._config))
+        if self._pool_factory is _default_pool_factory:
+            nebula_config = _build_nebula_config(self._config)
+        else:
+            nebula_config = self._config
+        ok = pool.init(self._config.hosts, nebula_config)
         if not ok:
             raise GraphConnectionError(
                 f"Failed to initialize NebulaGraph connection pool for hosts {self._config.hosts}"
