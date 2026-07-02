@@ -151,3 +151,20 @@ class FakePath:
 
     def relationships(self):
         return self._relationships
+
+
+class FakePool:
+    def __init__(self, init_result=True):
+        self._init_result = init_result
+        self.closed = False
+        self.init_args = None
+
+    def init(self, hosts, config):
+        self.init_args = (hosts, config)
+        return self._init_result
+
+    def close(self):
+        self.closed = True
+
+    def get_session(self, user, password):
+        raise NotImplementedError("set on the instance by tests that need a session")
