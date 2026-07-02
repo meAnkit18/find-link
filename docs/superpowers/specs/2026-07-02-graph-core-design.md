@@ -130,7 +130,8 @@ loading built in now (trivial to add a `from_env()` classmethod later without br
 the API — deferred until a consumer actually needs it).
 
 **exceptions.py** — five exceptions, each justified by a concrete failure mode:
-`GraphCoreError` (base), `ConnectionError`, `QueryExecutionError`, `SchemaError`,
+`GraphCoreError` (base), `GraphConnectionError` (named to avoid shadowing Python's
+builtin `ConnectionError`), `QueryExecutionError`, `SchemaError`,
 `ValidationError` (raised from `Vertex.validate()`/`Edge.validate()`). `get()` methods
 return `None` on not-found rather than raising, so no `NotFoundError` is needed.
 
@@ -139,7 +140,20 @@ consumers need: `connect()`, `close()`, factory access to `VertexOperations`,
 `EdgeOperations`, `Traversal`, `Metadata`, and an `execute_raw(ngql)` escape hatch for
 anything the primitives don't cover (still returns the Nebula-agnostic `QueryResult`).
 
-**storage/** — the only package importing `nebula3-python`.
+**identifiers.py** (top-level, dependency-free) — `validate_identifier(name, kind)`
+using the strict allowlist regex. `config.py` (space name), `query/builder.py`
+(tag/edge/property names), and `metadata.py` (tag/edge/index names) all import this
+single copy rather than each maintaining their own regex, since this is a
+security-relevant check (identifier injection) that must not drift.
+
+**storage/** — the only package importing `nebula3-python`, and only inside function
+bodies (never at module level), via an injectable `pool_factory`. This means every
+module in this package — and every unit test in this repo — imports and runs
+correctly whether or not `nebula3-python` is installed; tests substitute a fake pool/
+session/result-set. Only the real `_default_pool_factory()` codepath (never exercised
+by unit tests) requires the real package. `storage/serialization.py` additionally uses
+`from __future__ import annotations` with `TYPE_CHECKING`-guarded imports so it never
+imports `nebula3-python` even for type hints.
 - `connection.py`: wraps `nebula3.gclient.net.ConnectionPool`; `start()`/`close()`.
 - `session.py`: context manager acquiring/releasing a session from the pool.
 - `executor.py`: `execute(ngql: str) -> QueryResult`; raises `QueryExecutionError` on
@@ -230,3 +244,5 @@ No changes to `graph-core` itself are required to add a new domain.
 | Result-conversion inside `storage/` | Separate query layer converts results | Conversion needs `nebula3-python` types; only storage may import them |
 | Centralized `storage/serialization.py` for both encode and decode | Escaping in query builder, decoding in result mapper (separate) | Avoids drift between two independently-evolving conversion paths |
 | Mocked unit tests only, integration tests scaffolded but skipped | Docker Compose-based integration tests in CI now | No NebulaGraph instance available in this dev environment |
+| `nebula3-python` imported lazily via an injectable `pool_factory`, never at module level | Import it at module level and require it installed to run unit tests | User chose not to `pip install` anything in this sandbox; this lets the full unit test suite run without the package installed or a server running |
+| Exact `nebula3-python` method names (`ValueWrapper.is_vertex()`, `Node.tags()`, `Relationship.ranking()`, etc.) used in `serialization.py` are written from documented knowledge of the client, not verified against an installed copy | Verify by installing/inspecting the package now | User declined network/package access in this session; must be verified against a real NebulaGraph instance and installed `nebula3-python` before production use |
