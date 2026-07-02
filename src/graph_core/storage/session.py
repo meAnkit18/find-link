@@ -1,0 +1,25 @@
+"""Session acquisition/release against a NebulaGraph connection pool."""
+
+from __future__ import annotations
+
+from contextlib import contextmanager
+from typing import Any, Iterator
+
+from graph_core.config import GraphConfig
+from graph_core.exceptions import GraphConnectionError
+from graph_core.storage.connection import GraphConnectionPool
+
+
+@contextmanager
+def session_scope(connection_pool: GraphConnectionPool, config: GraphConfig) -> Iterator[Any]:
+    """Acquire a session from the pool for the configured space, releasing it afterward."""
+    session = connection_pool.pool.get_session(config.user, config.password)
+    try:
+        use_resp = session.execute(f"USE {config.space}")
+        if not use_resp.is_succeeded():
+            raise GraphConnectionError(
+                f"Failed to switch to space {config.space!r}: {use_resp.error_msg()}"
+            )
+        yield session
+    finally:
+        session.release()

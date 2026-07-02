@@ -168,3 +168,29 @@ class FakePool:
 
     def get_session(self, user, password):
         raise NotImplementedError("set on the instance by tests that need a session")
+
+
+class FakeUseResultSet:
+    def __init__(self, succeeded=True, error_msg=""):
+        self._succeeded = succeeded
+        self._error_msg = error_msg
+
+    def is_succeeded(self):
+        return self._succeeded
+
+    def error_msg(self):
+        return self._error_msg
+
+
+class FakeSession:
+    def __init__(self, use_succeeds=True):
+        self.released = False
+        self.executed = []
+        self._use_succeeds = use_succeeds
+
+    def execute(self, ngql):
+        self.executed.append(ngql)
+        return FakeUseResultSet(succeeded=self._use_succeeds, error_msg="space not found")
+
+    def release(self):
+        self.released = True
