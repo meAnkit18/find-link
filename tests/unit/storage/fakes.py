@@ -194,3 +194,40 @@ class FakeSession:
 
     def release(self):
         self.released = True
+
+
+class FakeResultSet:
+    def __init__(self, succeeded=True, error_msg="", column_names=None, rows=None):
+        self._succeeded = succeeded
+        self._error_msg = error_msg
+        self._column_names = column_names or []
+        self._rows = rows or []  # list of list[FakeValueWrapper]
+
+    def is_succeeded(self):
+        return self._succeeded
+
+    def error_msg(self):
+        return self._error_msg
+
+    def keys(self):
+        return self._column_names
+
+    def row_size(self):
+        return len(self._rows)
+
+    def row_values(self, index):
+        return self._rows[index]
+
+
+class FakeQuerySession(FakeSession):
+    """A FakeSession where the second execute() call (the real query) returns a canned FakeResultSet."""
+
+    def __init__(self, query_result: FakeResultSet, use_succeeds=True):
+        super().__init__(use_succeeds=use_succeeds)
+        self._query_result = query_result
+
+    def execute(self, ngql):
+        self.executed.append(ngql)
+        if ngql.startswith("USE "):
+            return FakeUseResultSet(succeeded=self._use_succeeds, error_msg="space not found")
+        return self._query_result
