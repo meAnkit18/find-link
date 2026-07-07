@@ -33,6 +33,18 @@ def _build_nebula_config(config: GraphConfig) -> Any:
     return nebula_config
 
 
+def _build_ssl_config(config: GraphConfig) -> Any:
+    import ssl as ssl_module
+
+    from nebula3.Config import SSL_config
+
+    ssl_config = SSL_config()
+    ssl_config.cert_reqs = ssl_module.CERT_REQUIRED
+    ssl_config.ca_certs = config.ssl_ca_certs or ssl_module.get_default_verify_paths().cafile
+    ssl_config.verify_name = True
+    return ssl_config
+
+
 class GraphConnectionPool:
     """Wraps a NebulaGraph connection pool's lifecycle (start/close)."""
 
@@ -46,9 +58,11 @@ class GraphConnectionPool:
         pool = self._pool_factory()
         if self._pool_factory is _default_pool_factory:
             nebula_config = _build_nebula_config(self._config)
+            ssl_config = _build_ssl_config(self._config) if self._config.use_ssl else None
+            ok = pool.init(self._config.hosts, nebula_config, ssl_config)
         else:
             nebula_config = self._config
-        ok = pool.init(self._config.hosts, nebula_config)
+            ok = pool.init(self._config.hosts, nebula_config)
         if not ok:
             raise GraphConnectionError(
                 f"Failed to initialize NebulaGraph connection pool for hosts {self._config.hosts}"

@@ -1,6 +1,7 @@
 """Run this against a real NebulaGraph instance once nebula3-python is
-installed: set NEBULA_TEST_HOST=<host> NEBULA_TEST_PORT=<port> and run
-`pytest tests/integration -v`.
+installed: set NEBULA_TEST_HOST=<host> NEBULA_TEST_PORT=<port> (see
+example.env for the full set of variables, including NEBULA_TEST_USE_SSL
+for NebulaGraph Cloud) and run `pytest tests/integration -v`.
 
 Verify in particular:
 - GraphClient.connect()/close() succeed against the real ConnectionPool.
@@ -26,6 +27,7 @@ def test_connect_and_create_space_and_tag():
         user=os.environ.get("NEBULA_TEST_USER", "root"),
         password=os.environ.get("NEBULA_TEST_PASSWORD", "nebula"),
         space=os.environ.get("NEBULA_TEST_SPACE", "graph_core_smoke_test"),
+        use_ssl=os.environ.get("NEBULA_TEST_USE_SSL", "false").lower() == "true",
     )
     with GraphClient(config) as client:
         assert client.metadata.list_spaces() is not None

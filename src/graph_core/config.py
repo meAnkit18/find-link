@@ -11,6 +11,8 @@ class GraphConfig:
 
     `hosts` is a list of (host, port) tuples for the graphd service(s).
     `space` is the NebulaGraph space to USE after connecting.
+    `use_ssl` enables TLS (required by NebulaGraph Cloud); `ssl_ca_certs`
+    overrides the CA bundle path, defaulting to the system's trust store.
     """
 
     hosts: list[tuple[str, int]]
@@ -20,6 +22,8 @@ class GraphConfig:
     pool_min_size: int = 0
     pool_max_size: int = 10
     timeout_ms: int = 60000
+    use_ssl: bool = False
+    ssl_ca_certs: str | None = None
 
     def __post_init__(self) -> None:
         if not self.hosts:

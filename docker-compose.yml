@@ -1,6 +1,11 @@
 # Single-node NebulaGraph cluster for local development and integration
 # testing (see tests/integration/conftest.py, which uses NEBULA_TEST_HOST).
 #
+# Sized for a small dev box (e.g. a 2GB-RAM machine): mem_limit caps below
+# keep metad+storaged+graphd+console under ~1.3GB combined so the host OS
+# and your IDE/editor still have headroom. Raise or drop them if you're
+# running on a bigger machine.
+#
 # Usage:
 #   docker compose up -d
 #   NEBULA_TEST_HOST=127.0.0.1 pytest tests/integration -v
@@ -27,6 +32,7 @@ services:
       timeout: 5s
       retries: 20
     restart: on-failure
+    mem_limit: 300m
 
   storaged0:
     image: vesoft/nebula-storaged:v3.6.0
@@ -39,6 +45,7 @@ services:
       - --data_path=/data/storage
       - --log_dir=/logs
       - --v=0
+      - --rocksdb_block_cache=4
     depends_on:
       metad0:
         condition: service_healthy
@@ -51,6 +58,7 @@ services:
       timeout: 5s
       retries: 20
     restart: on-failure
+    mem_limit: 500m
 
   graphd:
     image: vesoft/nebula-graphd:v3.6.0
@@ -62,6 +70,9 @@ services:
       - --ws_http_port=19669
       - --log_dir=/logs
       - --v=0
+      - --num_netio_threads=1
+      - --num_accept_threads=1
+      - --num_worker_threads=2
     depends_on:
       storaged0:
         condition: service_healthy
@@ -75,6 +86,7 @@ services:
       timeout: 5s
       retries: 20
     restart: on-failure
+    mem_limit: 500m
 
   # One-shot job: registers storaged0 with the meta service. Required once
   # per fresh cluster before any space can be created. Exits after running.
@@ -86,6 +98,7 @@ services:
     depends_on:
       graphd:
         condition: service_healthy
+    mem_limit: 64m
 
 volumes:
   nebula-meta-data:
