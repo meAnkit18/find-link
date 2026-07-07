@@ -46,3 +46,10 @@ def test_execute_releases_session():
     executor, session = _executor_with(result_set)
     executor.execute("SHOW TAGS")
     assert session.released is True
+
+
+def test_execute_with_use_space_false_skips_use_statement():
+    result_set = FakeResultSet(succeeded=True, column_names=[], rows=[])
+    executor, session = _executor_with(result_set)
+    executor.execute("SHOW SPACES", use_space=False)
+    assert session.executed == ["SHOW SPACES"]

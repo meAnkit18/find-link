@@ -20,6 +20,61 @@ is set:
 
     NEBULA_TEST_HOST=127.0.0.1 pytest tests/integration -v
 
+### Local development with Docker
+
+`docker-compose.yml` brings up a single-node NebulaGraph cluster
+(metad/storaged/graphd) for local dev, sized to run comfortably on a small
+machine (~1.3GB RAM combined across all services).
+
+Start it:
+
+    docker compose up -d
+    docker compose ps          # wait until all services show "healthy"
+
+The `console` service is a one-shot job that registers the storage host
+with the meta service (`ADD HOSTS`) — required once per fresh cluster
+before any space can be created. It exits after running; check its log if
+space creation fails:
+
+    docker compose logs console
+
+Then point graph-core / the integration tests at it (these are already the
+defaults in `tests/integration/test_smoke.py`, so plain `NEBULA_TEST_HOST`
+is enough):
+
+    NEBULA_TEST_HOST=127.0.0.1 pytest tests/integration -v
+
+Shut down, keeping data:
+
+    docker compose down
+
+Reset the database (wipe all data/volumes and start clean):
+
+    docker compose down -v
+    docker compose up -d
+
+Troubleshooting:
+
+- **A service never becomes healthy** — `docker compose logs metad0` (or
+  `storaged0`/`graphd`). Most often this is a stale volume from an
+  incompatible previous version; `docker compose down -v` and retry.
+- **`ADD HOSTS` / space creation fails** — the `console` job runs once,
+  5 seconds after `graphd` reports healthy. If `graphd` was slow to elect
+  a leader, that timing may be tight; check `docker compose logs console`
+  and re-run manually if needed:
+  `docker exec -it $(docker compose ps -q graphd) nebula-console -addr 127.0.0.1 -port 9669 -u root -p nebula -e 'ADD HOSTS "storaged0":9779;'`
+- **Out of memory / containers killed** — the per-service `mem_limit`
+  values in `docker-compose.yml` are tuned for ~2GB-RAM machines; lower
+  them further (or free up RAM from other processes) if containers get
+  OOM-killed, or raise them if you have more headroom.
+
+To run against a NebulaGraph Cloud (cloud.nebula-graph.io) cluster, copy
+`example.env` to `.env`, fill in your cluster's host/port/user/password
+(keep `NEBULA_TEST_USE_SSL=true`, which Cloud requires), then:
+
+    set -a; source .env; set +a
+    pytest tests/integration -v
+
 ## Usage
 
     from graph_core import GraphClient
@@ -48,3 +103,27 @@ is set:
    domain-specific repository rather than inheriting from them.
 
 No changes to `graph-core` itself are required to add a new domain.
+
+## Graph Explorer (Phase 1 app)
+
+`apps/` contains an end-to-end web app built on top of `graph-core`: upload
+a CSV, get an automatically-inferred graph, and explore it visually
+(search, expand neighborhoods, inspect nodes, filter by type) — no nGQL
+required. See
+`docs/superpowers/specs/2026-07-06-graph-explorer-design.md` for the full
+architecture and rationale.
+
+- `apps/api/` — FastAPI backend (CSV import pipeline + exploration API).
+  See `apps/api/README.md` to install and run it against
+  the NebulaGraph cluster from `docker-compose.yml`.
+- `apps/web/` — Vite + React + TypeScript frontend (Cytoscape.js graph
+  canvas). See `apps/web/README.md`.
+
+Quick start once NebulaGraph is up (`docker compose up -d`):
+
+    pip install -e ".[dev]"                 # graph-core
+    pip install -e "apps/api[dev]"          # backend
+    uvicorn graph_explorer_api.main:app --reload --port 8000 \
+      --app-dir apps/api/src
+
+    cd apps/web && npm install && npm run dev   # frontend, in another shell

@@ -19,8 +19,9 @@ class QueryExecutor:
         self._connection_pool = connection_pool
         self._config = config
 
-    def execute(self, ngql: str) -> QueryResult:
-        with session_scope(self._connection_pool, self._config) as session:
+    def execute(self, ngql: str, use_space: bool = True) -> QueryResult:
+        """Execute `ngql`. `use_space=False` skips `USE <space>` first (space administration)."""
+        with session_scope(self._connection_pool, self._config, use_space=use_space) as session:
             resp = session.execute(ngql)
             if not resp.is_succeeded():
                 raise QueryExecutionError(f"nGQL execution failed: {resp.error_msg()}")

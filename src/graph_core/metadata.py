@@ -3,6 +3,11 @@
 Built now (not deferred) because DDL creation without inspection is unsafe:
 you cannot tell whether CREATE TAG succeeded, or avoid re-creating an
 existing tag/edge/index, without the ability to inspect current state.
+
+Space-level operations (create/drop/list) run with `use_space=False`: the
+session's mandatory `USE <space>` would otherwise fail before a brand-new
+space exists, or when the caller just wants to enumerate spaces without
+committing to one.
 """
 
 from __future__ import annotations
@@ -20,13 +25,15 @@ class Metadata:
     # -- spaces --
 
     def create_space(self, name: str, vid_type: str = "FIXED_STRING(32)") -> None:
-        self._executor.execute(f"CREATE SPACE IF NOT EXISTS {name}(vid_type={vid_type})")
+        self._executor.execute(
+            f"CREATE SPACE IF NOT EXISTS {name}(vid_type={vid_type})", use_space=False
+        )
 
     def drop_space(self, name: str) -> None:
-        self._executor.execute(f"DROP SPACE IF EXISTS {name}")
+        self._executor.execute(f"DROP SPACE IF EXISTS {name}", use_space=False)
 
     def list_spaces(self) -> list[str]:
-        result = self._executor.execute("SHOW SPACES")
+        result = self._executor.execute("SHOW SPACES", use_space=False)
         return [row["Name"] for row in result.rows]
 
     def space_exists(self, name: str) -> bool:

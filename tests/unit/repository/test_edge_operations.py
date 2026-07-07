@@ -78,3 +78,19 @@ def test_delete_issues_delete_statement():
     ops = EdgeOperations(executor, make_registry())
     ops.delete("owns", "a", "b")
     assert executor.executed == ['DELETE EDGE owns "a"->"b"@0']
+
+
+def test_create_many_issues_single_bulk_insert():
+    executor = FakeExecutor()
+    ops = EdgeOperations(executor, make_registry())
+    ops.create_many("owns", [("a", "b", 0, {"since": 2020}), ("c", "d", 1, {"since": 2021})])
+    assert executor.executed == [
+        'INSERT EDGE owns(since) VALUES "a"->"b"@0:(2020), "c"->"d"@1:(2021)'
+    ]
+
+
+def test_create_many_noop_for_empty_rows():
+    executor = FakeExecutor()
+    ops = EdgeOperations(executor, make_registry())
+    ops.create_many("owns", [])
+    assert executor.executed == []

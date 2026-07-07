@@ -6,32 +6,37 @@ from graph_core.storage.result import QueryResult
 class FakeExecutor:
     def __init__(self):
         self.executed = []
+        self.use_space_flags = []
         self.responses = {}
 
-    def execute(self, ngql):
+    def execute(self, ngql, use_space=True):
         self.executed.append(ngql)
+        self.use_space_flags.append(use_space)
         return self.responses.get(ngql, QueryResult(column_names=[], rows=[]))
 
 
-def test_create_space_issues_create_space_statement():
+def test_create_space_issues_create_space_statement_without_use():
     executor = FakeExecutor()
     Metadata(executor).create_space("aml")
     assert executor.executed == ['CREATE SPACE IF NOT EXISTS aml(vid_type=FIXED_STRING(32))']
+    assert executor.use_space_flags == [False]
 
 
-def test_drop_space_issues_drop_space_statement():
+def test_drop_space_issues_drop_space_statement_without_use():
     executor = FakeExecutor()
     Metadata(executor).drop_space("aml")
     assert executor.executed == ["DROP SPACE IF EXISTS aml"]
+    assert executor.use_space_flags == [False]
 
 
-def test_list_spaces_extracts_names():
+def test_list_spaces_extracts_names_without_use():
     executor = FakeExecutor()
     executor.responses["SHOW SPACES"] = QueryResult(
         column_names=["Name"], rows=[{"Name": "aml"}, {"Name": "test_space"}]
     )
     names = Metadata(executor).list_spaces()
     assert names == ["aml", "test_space"]
+    assert executor.use_space_flags == [False]
 
 
 def test_space_exists_true_and_false():

@@ -8,14 +8,16 @@ domain repositories add whatever query methods they actually need.
 
 from __future__ import annotations
 
-from typing import Optional, Type
+from typing import Any, Optional, Type
 
 from graph_core.exceptions import SchemaError
 from graph_core.model.vertex import Vertex
 from graph_core.query.builder import (
     build_delete_vertex,
     build_fetch_vertex,
+    build_fetch_vertices,
     build_insert_vertex,
+    build_insert_vertices,
     build_upsert_vertex,
 )
 from graph_core.schema.registry import SchemaRegistry
@@ -57,6 +59,31 @@ class VertexOperations:
 
     def exists(self, tag: str, vid: str) -> bool:
         return self.get(tag, vid) is not None
+
+    def create_many(self, tag: str, rows: list[tuple[str, dict[str, Any]]]) -> None:
+        """Bulk-insert vertices of one tag in a single round trip.
+
+        Schema-agnostic: operates on raw (vid, properties) tuples rather than
+        Vertex instances, so callers with runtime-discovered tags (e.g. a CSV
+        importer) don't need a registered Vertex subclass. All rows must
+        share the same property columns. No-op for an empty list.
+        """
+        if not rows:
+            return
+        ngql = build_insert_vertices(tag, rows)
+        self._executor.execute(ngql)
+
+    def get_many_raw(self, vids: list[str]) -> list[RawVertex]:
+        """Fetch many vertices (any tag) in one round trip, without domain mapping.
+
+        Schema-agnostic counterpart to get(): returns RawVertex directly, so
+        it works for vertices whose tag has no registered Vertex subclass.
+        """
+        if not vids:
+            return []
+        ngql = build_fetch_vertices(vids)
+        result = self._executor.execute(ngql)
+        return [row["v"] for row in result.rows if isinstance(row.get("v"), RawVertex)]
 
     def _to_domain(self, raw: RawVertex) -> Vertex:
         vertex_cls: Type[Vertex] | None = None

@@ -53,3 +53,12 @@ def test_session_scope_raises_graph_connection_error_when_use_fails():
         with session_scope(conn, make_config()):
             pass
     assert session.released is True
+
+
+def test_session_scope_skips_use_when_use_space_false():
+    session = FakeSession(use_succeeds=False)
+    conn = _pool_with_session(session)
+    with session_scope(conn, make_config(), use_space=False) as s:
+        assert s is session
+    assert session.executed == []
+    assert session.released is True

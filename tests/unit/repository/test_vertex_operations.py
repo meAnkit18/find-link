@@ -95,3 +95,37 @@ def test_exists_true_and_false():
     raw = RawVertex(vid="v1", tags={"person": {"name": "Alice"}})
     executor.response = QueryResult(column_names=["v"], rows=[{"v": raw}])
     assert ops.exists("person", "v1") is True
+
+
+def test_create_many_issues_single_bulk_insert():
+    executor = FakeExecutor()
+    ops = VertexOperations(executor, make_registry())
+    ops.create_many("person", [("v1", {"name": "Alice"}), ("v2", {"name": "Bob"})])
+    assert executor.executed == [
+        'INSERT VERTEX person(name) VALUES "v1":("Alice"), "v2":("Bob")'
+    ]
+
+
+def test_create_many_noop_for_empty_rows():
+    executor = FakeExecutor()
+    ops = VertexOperations(executor, make_registry())
+    ops.create_many("person", [])
+    assert executor.executed == []
+
+
+def test_get_many_raw_returns_raw_vertices_without_domain_mapping():
+    executor = FakeExecutor()
+    raw_a = RawVertex(vid="v1", tags={"unregistered_tag": {"x": 1}})
+    raw_b = RawVertex(vid="v2", tags={"person": {"name": "Bob"}})
+    executor.response = QueryResult(column_names=["v"], rows=[{"v": raw_a}, {"v": raw_b}])
+    ops = VertexOperations(executor, make_registry())
+    result = ops.get_many_raw(["v1", "v2"])
+    assert result == [raw_a, raw_b]
+    assert executor.executed == ['FETCH PROP ON * "v1", "v2" YIELD VERTEX AS v']
+
+
+def test_get_many_raw_noop_for_empty_vids():
+    executor = FakeExecutor()
+    ops = VertexOperations(executor, make_registry())
+    assert ops.get_many_raw([]) == []
+    assert executor.executed == []

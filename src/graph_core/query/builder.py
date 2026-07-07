@@ -70,7 +70,7 @@ def build_delete_edge(edge_type: str, src: str, dst: str, rank: int) -> str:
     return f"DELETE EDGE {edge_type} {_format_vid(src)}->{_format_vid(dst)}@{rank}"
 
 
-def build_go_neighbors(vid: str, edge_type: str | None, direction: str) -> str:
+def _build_over_clause(edge_type: str | None, direction: str) -> str:
     if direction not in ("out", "in", "both"):
         raise ValueError(f"direction must be 'out', 'in', or 'both', got {direction!r}")
 
@@ -80,13 +80,80 @@ def build_go_neighbors(vid: str, edge_type: str | None, direction: str) -> str:
         edge_clause = edge_type
 
     if direction == "out":
-        over_clause = f"OVER {edge_clause}"
-    elif direction == "in":
-        over_clause = f"OVER {edge_clause} REVERSELY"
-    else:
-        over_clause = f"OVER {edge_clause} BIDIRECT"
+        return f"OVER {edge_clause}"
+    if direction == "in":
+        return f"OVER {edge_clause} REVERSELY"
+    return f"OVER {edge_clause} BIDIRECT"
 
+
+def build_go_neighbors(vid: str, edge_type: str | None, direction: str) -> str:
+    over_clause = _build_over_clause(edge_type, direction)
     return (
         f"GO FROM {_format_vid(vid)} {over_clause} YIELD DISTINCT dst(edge) AS id "
         f"| FETCH PROP ON * $-.id YIELD VERTEX AS v"
     )
+
+
+def build_count_neighbors(vid: str, edge_type: str | None, direction: str) -> str:
+    """Count distinct neighbor ids without hydrating full vertices."""
+    over_clause = _build_over_clause(edge_type, direction)
+    return f"GO FROM {_format_vid(vid)} {over_clause} YIELD DISTINCT dst(edge) AS id"
+
+
+def build_insert_vertices(tag: str, rows: list[tuple[str, dict[str, Any]]]) -> str:
+    """Build a single multi-row INSERT VERTEX statement.
+
+    All rows must share the same property columns (same keys, any order) so
+    they can be declared once in the column list, as nGQL requires.
+    """
+    validate_identifier(tag, "tag")
+    if not rows:
+        raise ValueError("build_insert_vertices requires at least one row")
+    columns = list(rows[0][1].keys())
+    for name in columns:
+        validate_identifier(name, "property")
+    columns_str = ", ".join(columns)
+    value_groups = []
+    for vid, properties in rows:
+        if set(properties.keys()) != set(columns):
+            raise ValueError("All rows in a batch must share the same property columns")
+        values = ", ".join(to_ngql_literal(properties[name]) for name in columns)
+        value_groups.append(f"{_format_vid(vid)}:({values})")
+    return f"INSERT VERTEX {tag}({columns_str}) VALUES {', '.join(value_groups)}"
+
+
+def build_insert_edges(
+    edge_type: str, rows: list[tuple[str, str, int, dict[str, Any]]]
+) -> str:
+    """Build a single multi-row INSERT EDGE statement (see build_insert_vertices)."""
+    validate_identifier(edge_type, "edge type")
+    if not rows:
+        raise ValueError("build_insert_edges requires at least one row")
+    columns = list(rows[0][3].keys())
+    for name in columns:
+        validate_identifier(name, "property")
+    columns_str = ", ".join(columns)
+    value_groups = []
+    for src, dst, rank, properties in rows:
+        if set(properties.keys()) != set(columns):
+            raise ValueError("All rows in a batch must share the same property columns")
+        values = ", ".join(to_ngql_literal(properties[name]) for name in columns)
+        value_groups.append(f"{_format_vid(src)}->{_format_vid(dst)}@{rank}:({values})")
+    return f"INSERT EDGE {edge_type}({columns_str}) VALUES {', '.join(value_groups)}"
+
+
+def build_fetch_vertices(vids: list[str]) -> str:
+    """Fetch many vertices (any tag) in one round trip."""
+    if not vids:
+        raise ValueError("build_fetch_vertices requires at least one vid")
+    vid_list = ", ".join(_format_vid(vid) for vid in vids)
+    return f"FETCH PROP ON * {vid_list} YIELD VERTEX AS v"
+
+
+def build_scan_vertices(tag: str, limit: int | None = None) -> str:
+    """Scan all vertices of a tag. LOOKUP without a WHERE clause needs no index."""
+    validate_identifier(tag, "tag")
+    ngql = f"LOOKUP ON {tag} YIELD id(vertex) AS id"
+    if limit is not None:
+        ngql += f" | LIMIT {int(limit)}"
+    return ngql + " | FETCH PROP ON * $-.id YIELD VERTEX AS v"
