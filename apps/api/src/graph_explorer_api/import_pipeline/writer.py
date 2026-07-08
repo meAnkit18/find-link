@@ -72,6 +72,11 @@ def ensure_tag(client: GraphClient, tag: str, columns: list[ColumnProfile]) -> N
         for c in columns
     ) + (PropertyDefinition(name=LABEL_PROPERTY, nebula_type="string"),)
     client.metadata.create_tag(TagSchema(name=tag, properties=properties))
+    write_with_retry(
+        lambda: client.metadata.create_tag_index(
+            f"{tag}_label_idx", tag, [f"{LABEL_PROPERTY}(256)"]
+        )
+    )
 
 
 def ensure_edge_type(client: GraphClient, edge_type: str, columns: list[ColumnProfile]) -> None:

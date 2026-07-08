@@ -17,7 +17,7 @@ services:
     command:
       - --meta_server_addrs=metad0:9559
       - --local_ip=metad0
-      - --ws_ip=metad0
+      - --ws_ip=0.0.0.0
       - --port=9559
       - --ws_http_port=19559
       - --data_path=/data/meta
@@ -39,7 +39,7 @@ services:
     command:
       - --meta_server_addrs=metad0:9559
       - --local_ip=storaged0
-      - --ws_ip=storaged0
+      - --ws_ip=0.0.0.0
       - --port=9779
       - --ws_http_port=19779
       - --data_path=/data/storage
@@ -53,10 +53,11 @@ services:
       - nebula-storage-data:/data/storage
       - nebula-storage-logs:/logs
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:19779/status"]
+      test: ["CMD-SHELL", "pgrep nebula-storaged || exit 1"]
       interval: 5s
       timeout: 5s
       retries: 20
+      start_period: 10s
     restart: on-failure
     mem_limit: 500m
 
@@ -65,7 +66,7 @@ services:
     command:
       - --meta_server_addrs=metad0:9559
       - --local_ip=graphd
-      - --ws_ip=graphd
+      - --ws_ip=0.0.0.0
       - --port=9669
       - --ws_http_port=19669
       - --log_dir=/logs
@@ -74,6 +75,8 @@ services:
       - --num_accept_threads=1
       - --num_worker_threads=2
     depends_on:
+      metad0:
+        condition: service_healthy
       storaged0:
         condition: service_healthy
     ports:
@@ -81,7 +84,7 @@ services:
     volumes:
       - nebula-graph-logs:/logs
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:19669/status"]
+      test: ["CMD-SHELL", "pgrep nebula-graphd || exit 1"]
       interval: 5s
       timeout: 5s
       retries: 20
@@ -94,9 +97,17 @@ services:
     image: vesoft/nebula-console:v3.6.0
     entrypoint: ["sh", "-c"]
     command:
-      - "sleep 5 && nebula-console -addr graphd -port 9669 -u root -p nebula -e 'ADD HOSTS \"storaged0\":9779;'"
+      - >
+        sleep 10 &&
+        until nebula-console -addr graphd -port 9669 -u root -p nebula -e 'ADD HOSTS "storaged0":9779;' 2>/dev/null; do
+          echo "Waiting for graphd...";
+          sleep 3;
+        done &&
+        echo "Storage host registered."
     depends_on:
-      graphd:
+      storaged0:
+        condition: service_healthy
+      metad0:
         condition: service_healthy
     mem_limit: 64m
 

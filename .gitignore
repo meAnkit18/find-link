@@ -6,4 +6,12 @@ __pycache__/
 database-credentials*.csv
 .env
 .ipynb_checkpoints/
+node_modules/
+dist/
+build/
+.coverage
+coverage/
+.mypy_cache/
+.ruff_cache/
+*.log
 apps/api/data/
