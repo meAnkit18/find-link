@@ -1,17 +1,32 @@
+# Python
 __pycache__/
 *.pyc
-.pytest_cache/
 *.egg-info/
 .venv/
-database-credentials*.csv
-.env
-.ipynb_checkpoints/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage/
+
+# Node
 node_modules/
 dist/
 build/
-.coverage
-coverage/
-.mypy_cache/
-.ruff_cache/
-*.log
+
+# Runtime state (uploaded files, graph registry) — never commit
+data/
 apps/api/data/
+
+# Generated analysis output
+graphify-out/
+
+# Notebooks
+.ipynb_checkpoints/
+
+# Env & secrets
+.env
+database-credentials*.csv
+
+# Logs
+*.log
