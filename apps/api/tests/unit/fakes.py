@@ -32,6 +32,9 @@ class FakeMetadata:
     def create_edge_type(self, schema) -> None:
         self.store.edge_types[schema.name] = schema
 
+    def create_tag_index(self, index_name: str, tag: str, property_names: list[str]) -> None:
+        pass
+
     def list_tags(self) -> list[str]:
         return list(self.store.tags)
 
