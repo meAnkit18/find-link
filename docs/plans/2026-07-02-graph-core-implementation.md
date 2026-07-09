@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Build `graph-core`, a domain-agnostic Graph Data Layer over NebulaGraph, per `docs/superpowers/specs/2026-07-02-graph-core-design.md`.
+**Goal:** Build `graph-core`, a domain-agnostic Graph Data Layer over NebulaGraph, per `docs/specs/2026-07-02-graph-core-design.md`.
 
 **Architecture:** Layered: `storage/` (only package importing `nebula3-python`, lazily via an injectable factory) → `query/builder.py` (pure nGQL string construction) → `schema/` (registry + models) → `metadata.py` (graph administration) → `repository/` (non-generic CRUD/traversal primitives) → `client.py` (public facade). `model/vertex.py` and `model/edge.py` are extension-point ABCs used across layers.
 
@@ -3083,7 +3083,7 @@ Expected: 1 test, SKIPPED (reason: "Set NEBULA_TEST_HOST to run integration test
 # graph-core
 
 A domain-agnostic Graph Data Layer over NebulaGraph. See
-`docs/superpowers/specs/2026-07-02-graph-core-design.md` for the full
+`docs/specs/2026-07-02-graph-core-design.md` for the full
 architecture and design rationale.
 
 ## Installation

@@ -1,7 +1,7 @@
 # graph-core
 
 A domain-agnostic Graph Data Layer over NebulaGraph. See
-`docs/superpowers/specs/2026-07-02-graph-core-design.md` for the full
+`docs/specs/2026-07-02-graph-core-design.md` for the full
 architecture and design rationale.
 
 ## Installation
@@ -110,7 +110,7 @@ No changes to `graph-core` itself are required to add a new domain.
 a CSV, get an automatically-inferred graph, and explore it visually
 (search, expand neighborhoods, inspect nodes, filter by type) — no nGQL
 required. See
-`docs/superpowers/specs/2026-07-06-graph-explorer-design.md` for the full
+`docs/specs/2026-07-06-graph-explorer-design.md` for the full
 architecture and rationale.
 
 - `apps/api/` — FastAPI backend (CSV import pipeline + exploration API).
