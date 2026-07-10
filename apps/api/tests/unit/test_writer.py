@@ -2,7 +2,7 @@ import pytest
 
 from graph_core.exceptions import QueryExecutionError
 
-from graph_explorer_api.import_pipeline import writer
+from graph_explorer_api.ingest import writer
 from tests.unit.fakes import FakeGraphClient
 
 
@@ -62,7 +62,7 @@ def test_write_with_retry_raises_after_exhausting_budget(monkeypatch):
 
 
 def test_pick_label_column_prefers_name_hint():
-    from graph_explorer_api.import_pipeline.csv_inspector import ColumnProfile
+    from graph_explorer_api.ingest.csv_inspector import ColumnProfile
 
     columns = [
         ColumnProfile(name="full_name", inferred_type="string", null_ratio=0, distinct_ratio=1),

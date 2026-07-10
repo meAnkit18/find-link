@@ -18,8 +18,8 @@ from graph_explorer_api.dependencies import (
 from graph_explorer_api.config import Settings
 from graph_explorer_api.graph_clients import GraphClientCache
 from graph_explorer_api.graph_registry import GraphRegistry
-from graph_explorer_api.import_pipeline.report import ImportReport
-from graph_explorer_api.imports.jobs import ImportJob, ImportJobRunner
+from graph_explorer_api.ingest.report import ImportReport
+from graph_explorer_api.ingest.jobs import ImportJob, ImportJobRunner
 from graph_explorer_api.search.index import SearchIndex
 
 router = APIRouter(prefix="/api/graphs/{graph_id}/imports", tags=["imports"])

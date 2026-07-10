@@ -165,8 +165,8 @@ class SyncImportJobRunner:
         self._jobs: dict = {}
 
     def start(self, graph_id, filename, path, client, on_complete=None):
-        from graph_explorer_api.import_pipeline.pipeline import run_import
-        from graph_explorer_api.imports.jobs import ImportJob
+        from graph_explorer_api.ingest.pipeline import run_import
+        from graph_explorer_api.ingest.jobs import ImportJob
 
         job = ImportJob(id=f"job-{len(self._jobs)}", graph_id=graph_id, filename=filename)
         try:

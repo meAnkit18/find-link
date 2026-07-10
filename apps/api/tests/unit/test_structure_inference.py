@@ -1,5 +1,5 @@
-from graph_explorer_api.import_pipeline.csv_inspector import inspect_csv
-from graph_explorer_api.import_pipeline.structure_inference import (
+from graph_explorer_api.ingest.csv_inspector import inspect_csv
+from graph_explorer_api.ingest.structure_inference import (
     EdgeListStructure,
     NodeTableStructure,
     infer_structure,

@@ -12,7 +12,7 @@ from fastapi import HTTPException, Request
 from graph_explorer_api.config import Settings
 from graph_explorer_api.graph_clients import GraphClientCache
 from graph_explorer_api.graph_registry import Graph, GraphRegistry
-from graph_explorer_api.imports.jobs import ImportJobRunner
+from graph_explorer_api.ingest.jobs import ImportJobRunner
 from graph_explorer_api.search.index import SearchIndex
 
 

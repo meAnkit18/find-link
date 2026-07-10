@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from graph_explorer_api.import_pipeline.csv_inspector import ColumnProfile, InspectionResult
+from graph_explorer_api.ingest.csv_inspector import ColumnProfile, InspectionResult
 from graph_explorer_api.naming import sanitize_identifier
 
 _PAIR_PATTERNS = [

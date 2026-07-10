@@ -17,8 +17,8 @@ from typing import Callable, Optional
 
 from graph_core.client import GraphClient
 
-from graph_explorer_api.import_pipeline.pipeline import run_import
-from graph_explorer_api.import_pipeline.report import ImportReport
+from graph_explorer_api.ingest.pipeline import run_import
+from graph_explorer_api.ingest.report import ImportReport
 
 
 @dataclass

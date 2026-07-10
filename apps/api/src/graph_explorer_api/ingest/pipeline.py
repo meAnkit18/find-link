@@ -1,7 +1,7 @@
 """Orchestrates one CSV import: inspect -> infer structure -> materialize
 schema -> dedupe + bulk write -> report.
 
-Runs synchronously; graph_explorer_api.imports.jobs is what makes this
+Runs synchronously; graph_explorer_api.ingest.jobs is what makes this
 non-blocking for the API (runs it on a background thread).
 """
 
@@ -13,10 +13,10 @@ from pathlib import Path
 
 from graph_core.client import GraphClient
 
-from graph_explorer_api.import_pipeline import writer
-from graph_explorer_api.import_pipeline.csv_inspector import inspect_csv
-from graph_explorer_api.import_pipeline.report import ImportReport
-from graph_explorer_api.import_pipeline.structure_inference import (
+from graph_explorer_api.ingest import writer
+from graph_explorer_api.ingest.csv_inspector import inspect_csv
+from graph_explorer_api.ingest.report import ImportReport
+from graph_explorer_api.ingest.structure_inference import (
     EdgeListStructure,
     NodeTableStructure,
     infer_structure,

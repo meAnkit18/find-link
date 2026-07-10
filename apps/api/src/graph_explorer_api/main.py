@@ -16,7 +16,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from graph_explorer_api.config import load_settings
 from graph_explorer_api.graph_clients import GraphClientCache
 from graph_explorer_api.graph_registry import GraphRegistry
-from graph_explorer_api.imports.jobs import ImportJobRunner
+from graph_explorer_api.ingest.jobs import ImportJobRunner
 from graph_explorer_api.routers import explorer, graphs, imports
 from graph_explorer_api.search.index import SearchIndex
 

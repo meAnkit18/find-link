@@ -20,7 +20,7 @@ from graph_core.client import GraphClient
 from graph_core.exceptions import QueryExecutionError
 from graph_core.schema.models import EdgeSchema, PropertyDefinition, TagSchema
 
-from graph_explorer_api.import_pipeline.csv_inspector import ColumnProfile
+from graph_explorer_api.ingest.csv_inspector import ColumnProfile
 
 BATCH_SIZE = 200
 LABEL_PROPERTY = "label"

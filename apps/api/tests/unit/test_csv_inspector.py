@@ -1,6 +1,6 @@
 import pytest
 
-from graph_explorer_api.import_pipeline.csv_inspector import inspect_csv
+from graph_explorer_api.ingest.csv_inspector import inspect_csv
 
 
 def test_infers_column_types(tmp_path):
