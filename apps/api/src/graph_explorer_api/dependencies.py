@@ -14,6 +14,8 @@ from graph_explorer_api.graph_clients import GraphClientCache
 from graph_explorer_api.graph_registry import Graph, GraphRegistry
 from graph_explorer_api.ingest.jobs import ImportJobRunner
 from graph_explorer_api.search.index import SearchIndex
+from graph_explorer_api.services.graph_service import GraphService
+from graph_explorer_api.services.investigation_service import InvestigationService
 
 
 def get_settings(request: Request) -> Settings:
@@ -34,6 +36,14 @@ def get_jobs(request: Request) -> ImportJobRunner:
 
 def get_search_index(request: Request) -> SearchIndex:
     return request.app.state.search_index
+
+
+def get_graph_service(request: Request) -> GraphService:
+    return request.app.state.graph_service
+
+
+def get_investigation_service(request: Request) -> InvestigationService:
+    return request.app.state.investigation_service
 
 
 def get_graph_or_404(graph_id: str, registry: GraphRegistry) -> Graph:

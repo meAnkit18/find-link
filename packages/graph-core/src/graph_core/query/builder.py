@@ -157,3 +157,49 @@ def build_scan_vertices(tag: str, limit: int | None = None) -> str:
     if limit is not None:
         ngql += f" | LIMIT {int(limit)}"
     return ngql + " | FETCH PROP ON * $-.id YIELD VERTEX AS v"
+
+
+def build_find_shortest_path(
+    source_vid: str, target_vid: str, max_steps: int = 5, edge_type: str | None = None
+) -> str:
+    over_clause = f"OVER {edge_type}" if edge_type else "OVER *"
+    return (
+        f'FIND SHORTEST PATH FROM {_format_vid(source_vid)} '
+        f'TO {_format_vid(target_vid)} '
+        f'{over_clause} UPTO {max_steps} STEPS YIELD path AS p'
+    )
+
+
+def build_go_neighbors_with_edges(
+    vid: str, edge_type: str | None = None, direction: str = "out"
+) -> str:
+    over_clause = _build_over_clause(edge_type, direction)
+    return (
+        f"GO FROM {_format_vid(vid)} {over_clause} "
+        f"YIELD DISTINCT dst(edge) AS id, edge AS e"
+    )
+
+
+def build_edge_existence_check(edge_type: str, src: str, dst: str, rank: int = 0) -> str:
+    validate_identifier(edge_type, "edge type")
+    return (
+        f"FETCH PROP ON {edge_type} "
+        f"{_format_vid(src)}->{_format_vid(dst)}@{rank} "
+        f"YIELD EDGE AS e"
+    )
+
+
+def build_upsert_edge(
+    edge_type: str, src: str, dst: str, rank: int, properties: dict[str, Any]
+) -> str:
+    validate_identifier(edge_type, "edge type")
+    for name in properties:
+        validate_identifier(name, "property")
+    assignments = ", ".join(
+        f"{edge_type}.{name} = {to_ngql_literal(value)}" for name, value in properties.items()
+    )
+    return (
+        f"UPSERT EDGE ON {edge_type} "
+        f"{_format_vid(src)}->{_format_vid(dst)}@{rank} "
+        f"SET {assignments}"
+    )

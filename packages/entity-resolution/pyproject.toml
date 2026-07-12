@@ -1,0 +1,18 @@
+[project]
+name = "entity-resolution"
+version = "0.1.0"
+description = "Entity resolution engine: exact matching, fuzzy matching, multi-field scoring, merge review"
+requires-python = ">=3.10"
+dependencies = [
+    "graph-core",
+]
+
+[tool.uv.sources]
+graph-core = { workspace = true }
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]

@@ -52,7 +52,7 @@ def to_ngql_literal(value: Any) -> str:
     raise TypeError(f"Cannot render value of type {type(value)!r} as an nGQL literal")
 
 
-def from_value_wrapper(value: "ValueWrapper") -> Any:
+def from_value_wrapper(value: ValueWrapper) -> Any:
     """Decode a single NebulaGraph ValueWrapper into a plain Python value."""
     if value.is_null():
         return None
@@ -74,10 +74,26 @@ def from_value_wrapper(value: "ValueWrapper") -> Any:
         return from_nebula_edge(value.as_relationship())
     if value.is_path():
         return from_nebula_path(value.as_path())
+    if hasattr(value, "is_datetime") and value.is_datetime():
+        dt = value.as_datetime()
+        return datetime(dt.get_year(), dt.get_month(), dt.get_day(),
+                        dt.get_hour(), dt.get_minute(), dt.get_sec(), dt.get_microsec())
+    if hasattr(value, "is_date") and value.is_date():
+        d = value.as_date()
+        from nebula3.data.DataObject import DateWrapper
+        if isinstance(d, DateWrapper):
+            return date(d.get_year(), d.get_month(), d.get_day())
+        return date(d.year, d.month, d.day)
+    if hasattr(value, "is_time") and value.is_time():
+        t = value.as_time()
+        from nebula3.data.DataObject import TimeWrapper
+        if isinstance(t, TimeWrapper):
+            return time(t.get_hour(), t.get_minute(), t.get_sec(), t.get_microsec())
+        return time(t.hour, t.minute, t.sec, t.microsec)
     raise TypeError(f"Unsupported NebulaGraph value type: {value!r}")
 
 
-def from_nebula_vertex(node: "Node") -> RawVertex:
+def from_nebula_vertex(node: Node) -> RawVertex:
     """Decode a NebulaGraph Node into a RawVertex."""
     vid = from_value_wrapper(node.get_id())
     tags: dict[str, dict[str, Any]] = {}
@@ -87,7 +103,7 @@ def from_nebula_vertex(node: "Node") -> RawVertex:
     return RawVertex(vid=str(vid), tags=tags)
 
 
-def from_nebula_edge(relationship: "Relationship") -> RawEdge:
+def from_nebula_edge(relationship: Relationship) -> RawEdge:
     """Decode a NebulaGraph Relationship into a RawEdge."""
     src = from_value_wrapper(relationship.start_vertex_id())
     dst = from_value_wrapper(relationship.end_vertex_id())
@@ -101,7 +117,7 @@ def from_nebula_edge(relationship: "Relationship") -> RawEdge:
     )
 
 
-def from_nebula_path(path: "PathWrapper") -> RawPath:
+def from_nebula_path(path: PathWrapper) -> RawPath:
     """Decode a NebulaGraph PathWrapper into a RawPath."""
     vertices = [from_nebula_vertex(node) for node in path.nodes()]
     edges = [from_nebula_edge(rel) for rel in path.relationships()]

@@ -6,7 +6,7 @@ than inheriting from a generic repository base class.
 
 from __future__ import annotations
 
-from typing import Any, Optional, Type
+from typing import Any
 
 from graph_core.exceptions import SchemaError
 from graph_core.model.edge import Edge
@@ -33,7 +33,7 @@ class EdgeOperations:
         ngql = build_insert_edge(edge.edge_type, edge.src, edge.dst, edge.rank, edge.properties)
         self._executor.execute(ngql)
 
-    def get(self, edge_type: str, src: str, dst: str, rank: int = 0) -> Optional[Edge]:
+    def get(self, edge_type: str, src: str, dst: str, rank: int = 0) -> Edge | None:
         ngql = build_fetch_edge(edge_type, src, dst, rank)
         result = self._executor.execute(ngql)
         row = result.single_row()
@@ -64,7 +64,7 @@ class EdgeOperations:
         self._executor.execute(ngql)
 
     def _to_domain(self, raw: RawEdge) -> Edge:
-        edge_cls: Type[Edge] | None = self._registry.get_edge_class(raw.edge_type)
+        edge_cls: type[Edge] | None = self._registry.get_edge_class(raw.edge_type)
         if edge_cls is None:
             raise SchemaError(f"No Edge class registered for edge type {raw.edge_type!r}")
         return edge_cls(src=raw.src, dst=raw.dst, rank=raw.rank, properties=raw.properties)

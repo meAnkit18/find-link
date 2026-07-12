@@ -8,7 +8,7 @@ domain repositories add whatever query methods they actually need.
 
 from __future__ import annotations
 
-from typing import Any, Optional, Type
+from typing import Any
 
 from graph_core.exceptions import SchemaError
 from graph_core.model.vertex import Vertex
@@ -42,7 +42,7 @@ class VertexOperations:
         ngql = build_upsert_vertex(vertex.tag, vertex.vid, vertex.properties)
         self._executor.execute(ngql)
 
-    def get(self, tag: str, vid: str) -> Optional[Vertex]:
+    def get(self, tag: str, vid: str) -> Vertex | None:
         ngql = build_fetch_vertex(tag, vid)
         result = self._executor.execute(ngql)
         row = result.single_row()
@@ -86,7 +86,7 @@ class VertexOperations:
         return [row["v"] for row in result.rows if isinstance(row.get("v"), RawVertex)]
 
     def _to_domain(self, raw: RawVertex) -> Vertex:
-        vertex_cls: Type[Vertex] | None = None
+        vertex_cls: type[Vertex] | None = None
         properties: dict = {}
         for tag_name, props in raw.tags.items():
             cls = self._registry.get_vertex_class(tag_name)

@@ -2,7 +2,18 @@
 # Members are defined below; shared lint config lives here.
 
 [tool.uv.workspace]
-members = ["packages/graph-core", "apps/api"]
+members = [
+    "packages/graph-core",
+    "packages/intelligence-schema",
+    "packages/evidence-core",
+    "packages/ingestion-core",
+    "packages/entity-resolution",
+    "packages/risk-engine",
+    "packages/agent-tools",
+    "packages/reasoning-core",
+    "apps/api",
+    "apps/worker",
+]
 
 [dependency-groups]
 dev = [
@@ -13,7 +24,18 @@ dev = [
 [tool.ruff]
 line-length = 100
 target-version = "py310"
-src = ["packages/graph-core/src", "apps/api/src"]
+src = [
+    "packages/graph-core/src",
+    "packages/intelligence-schema/src",
+    "packages/evidence-core/src",
+    "packages/ingestion-core/src",
+    "packages/entity-resolution/src",
+    "packages/risk-engine/src",
+    "packages/agent-tools/src",
+    "packages/reasoning-core/src",
+    "apps/api/src",
+    "apps/worker/src",
+]
 extend-exclude = ["apps/web"]
 
 [tool.ruff.lint]

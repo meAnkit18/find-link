@@ -11,12 +11,11 @@ from __future__ import annotations
 import threading
 import traceback
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Optional
 
 from graph_core.client import GraphClient
-
 from graph_explorer_api.ingest.pipeline import run_import
 from graph_explorer_api.ingest.report import ImportReport
 
@@ -27,8 +26,8 @@ class ImportJob:
     graph_id: str
     filename: str
     status: str = "pending"  # pending | running | done | failed
-    report: Optional[ImportReport] = None
-    error: Optional[str] = None
+    report: ImportReport | None = None
+    error: str | None = None
 
 
 class ImportJobRunner:
@@ -42,7 +41,7 @@ class ImportJobRunner:
         filename: str,
         path: Path,
         client: GraphClient,
-        on_complete: Optional[Callable[[ImportReport], None]] = None,
+        on_complete: Callable[[ImportReport], None] | None = None,
     ) -> ImportJob:
         job = ImportJob(id=uuid.uuid4().hex, graph_id=graph_id, filename=filename)
         with self._lock:
@@ -66,7 +65,7 @@ class ImportJobRunner:
         threading.Thread(target=_run, daemon=True).start()
         return job
 
-    def get(self, job_id: str) -> Optional[ImportJob]:
+    def get(self, job_id: str) -> ImportJob | None:
         with self._lock:
             return self._jobs.get(job_id)
 

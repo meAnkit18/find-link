@@ -1,0 +1,62 @@
+-- Evidence and provenance schema
+-- Every claim in the graph should have supporting evidence.
+
+USE intelligence_graph;
+
+CREATE TAG IF NOT EXISTS evidence_snippet(
+    evidence_id string NOT NULL,
+    source_type string NOT NULL,
+    source_name string NOT NULL,
+    source_uri string NULL,
+    snippet_text string NULL,
+    confidence double NOT NULL,
+    created_at datetime NOT NULL
+);
+
+CREATE TAG IF NOT EXISTS source_record(
+    source_id string NOT NULL,
+    source_name string NOT NULL,
+    source_type string NOT NULL,
+    source_uri string NULL,
+    ingested_at datetime NOT NULL,
+    checksum string NULL,
+    record_count int NULL
+);
+
+CREATE TAG IF NOT EXISTS import_batch(
+    batch_id string NOT NULL,
+    source_name string NOT NULL,
+    file_name string NOT NULL,
+    status string NOT NULL,
+    row_count int NOT NULL,
+    created_count int NOT NULL,
+    merged_count int NOT NULL,
+    error_count int NOT NULL,
+    started_at datetime NOT NULL,
+    completed_at datetime NULL,
+    created_at datetime NOT NULL
+);
+
+-- Evidence relationships
+
+CREATE EDGE IF NOT EXISTS SUPPORTED_BY(
+    confidence double NOT NULL,
+    claim string NULL,
+    created_at datetime NOT NULL
+);
+
+CREATE EDGE IF NOT EXISTS EXTRACTED_FROM(
+    position_start int NULL,
+    position_end int NULL,
+    created_at datetime NOT NULL
+);
+
+CREATE EDGE IF NOT EXISTS INGESTED_IN(
+    created_at datetime NOT NULL
+);
+
+CREATE EDGE IF NOT EXISTS MENTIONS(
+    confidence double NOT NULL,
+    context string NULL,
+    created_at datetime NOT NULL
+);

@@ -1,0 +1,28 @@
+-- Review queue and background job indexes
+
+USE intelligence_graph;
+
+-- Review item indexes
+CREATE TAG INDEX IF NOT EXISTS review_item_status_idx ON review_item(status(16));
+CREATE TAG INDEX IF NOT EXISTS review_item_queue_type_idx ON review_item(queue_type(16));
+CREATE TAG INDEX IF NOT EXISTS review_item_created_at_idx ON review_item(created_at);
+
+-- Background job indexes
+CREATE TAG INDEX IF NOT EXISTS background_job_status_idx ON background_job(status(16));
+CREATE TAG INDEX IF NOT EXISTS background_job_type_idx ON background_job(job_type(16));
+CREATE TAG INDEX IF NOT EXISTS background_job_lease_idx ON background_job(lease_owner(32));
+
+-- Audit event indexes
+CREATE TAG INDEX IF NOT EXISTS audit_event_type_idx ON audit_event(event_type(32));
+CREATE TAG INDEX IF NOT EXISTS audit_event_actor_idx ON audit_event(actor_id(32));
+CREATE TAG INDEX IF NOT EXISTS audit_event_occurred_idx ON audit_event(occurred_at);
+
+-- Investigation case indexes
+CREATE TAG INDEX IF NOT EXISTS case_status_idx ON investigation_case(status(16));
+CREATE TAG INDEX IF NOT EXISTS case_priority_idx ON investigation_case(priority(16));
+CREATE TAG INDEX IF NOT EXISTS case_created_by_idx ON investigation_case(created_by(32));
+CREATE TAG INDEX IF NOT EXISTS case_created_at_idx ON investigation_case(created_at);
+
+-- Search term indexes
+CREATE TAG INDEX IF NOT EXISTS search_term_value_idx ON search_term(normalized_value(128));
+CREATE TAG INDEX IF NOT EXISTS search_term_type_idx ON search_term(term_type(32));

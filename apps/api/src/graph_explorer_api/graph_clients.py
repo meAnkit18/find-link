@@ -10,7 +10,6 @@ from __future__ import annotations
 import threading
 
 from graph_core.client import GraphClient
-
 from graph_explorer_api.config import ADMIN_SPACE, Settings
 
 

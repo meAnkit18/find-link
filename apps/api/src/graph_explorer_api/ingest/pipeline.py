@@ -12,7 +12,6 @@ import time
 from pathlib import Path
 
 from graph_core.client import GraphClient
-
 from graph_explorer_api.ingest import writer
 from graph_explorer_api.ingest.csv_inspector import inspect_csv
 from graph_explorer_api.ingest.report import ImportReport
@@ -114,7 +113,7 @@ def run_import(client: GraphClient, path: Path, filename: str) -> ImportReport:
 
     report = ImportReport(filename=filename, structure_kind=structure.kind)
 
-    with open(path, "r", encoding="utf-8-sig", newline="") as f:
+    with open(path, encoding="utf-8-sig", newline="") as f:
         rows = list(csv.DictReader(f, delimiter=inspection.delimiter))
     report.rows_read = len(rows)
 

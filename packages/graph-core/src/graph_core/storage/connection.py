@@ -9,7 +9,8 @@ importable and testable without nebula3-python installed.
 
 from __future__ import annotations
 
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 from graph_core.config import GraphConfig
 from graph_core.exceptions import GraphConnectionError

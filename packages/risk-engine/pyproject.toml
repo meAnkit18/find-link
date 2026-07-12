@@ -1,0 +1,20 @@
+[project]
+name = "risk-engine"
+version = "0.1.0"
+description = "Risk scoring engine: direct signals, indirect propagation, explainable risk factors"
+requires-python = ">=3.10"
+dependencies = [
+    "graph-core",
+    "evidence-core",
+]
+
+[tool.uv.sources]
+graph-core = { workspace = true }
+evidence-core = { workspace = true }
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]

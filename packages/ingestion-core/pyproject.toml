@@ -1,0 +1,22 @@
+[project]
+name = "ingestion-core"
+version = "0.1.0"
+description = "Data ingestion pipeline: source adapters, normalization, entity extraction, graph mutation planning"
+requires-python = ">=3.10"
+dependencies = [
+    "graph-core",
+    "entity-resolution",
+    "evidence-core",
+]
+
+[tool.uv.sources]
+graph-core = { workspace = true }
+entity-resolution = { workspace = true }
+evidence-core = { workspace = true }
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]

@@ -7,6 +7,7 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException, UploadFile
 from pydantic import BaseModel
 
+from graph_explorer_api.config import Settings
 from graph_explorer_api.dependencies import (
     get_clients,
     get_graph_or_404,
@@ -15,11 +16,10 @@ from graph_explorer_api.dependencies import (
     get_search_index,
     get_settings,
 )
-from graph_explorer_api.config import Settings
 from graph_explorer_api.graph_clients import GraphClientCache
 from graph_explorer_api.graph_registry import GraphRegistry
-from graph_explorer_api.ingest.report import ImportReport
 from graph_explorer_api.ingest.jobs import ImportJob, ImportJobRunner
+from graph_explorer_api.ingest.report import ImportReport
 from graph_explorer_api.search.index import SearchIndex
 
 router = APIRouter(prefix="/api/graphs/{graph_id}/imports", tags=["imports"])
@@ -38,7 +38,7 @@ class ImportReportOut(BaseModel):
     elapsed_seconds: float
 
     @classmethod
-    def from_report(cls, report: ImportReport) -> "ImportReportOut":
+    def from_report(cls, report: ImportReport) -> ImportReportOut:
         return cls(**report.__dict__)
 
 
@@ -51,7 +51,7 @@ class ImportJobOut(BaseModel):
     error: str | None
 
     @classmethod
-    def from_job(cls, job: ImportJob) -> "ImportJobOut":
+    def from_job(cls, job: ImportJob) -> ImportJobOut:
         return cls(
             job_id=job.id,
             graph_id=job.graph_id,

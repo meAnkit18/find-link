@@ -1,0 +1,188 @@
+-- Intelligence-domain schema
+-- These tags and edges represent domain entities and their relationships.
+-- Created by the intelligence-schema bootstrap at runtime, but documented here
+-- for reference and manual setup.
+
+USE intelligence_graph;
+
+-- Entity tags
+
+CREATE TAG IF NOT EXISTS person(
+    label string NOT NULL,
+    entity_type string NOT NULL,
+    full_name string NOT NULL,
+    date_of_birth date NULL,
+    nationality string NULL,
+    passport_number string NULL,
+    national_id string NULL,
+    risk_score double NULL,
+    confidence double NULL,
+    status string NULL,
+    first_seen_at datetime NULL,
+    last_seen_at datetime NULL,
+    created_at datetime NULL,
+    updated_at datetime NULL
+);
+
+CREATE TAG IF NOT EXISTS company(
+    label string NOT NULL,
+    entity_type string NOT NULL,
+    name string NOT NULL,
+    registration_number string NULL,
+    country string NULL,
+    incorporation_date date NULL,
+    risk_score double NULL,
+    confidence double NULL,
+    status string NULL,
+    first_seen_at datetime NULL,
+    last_seen_at datetime NULL,
+    created_at datetime NULL,
+    updated_at datetime NULL
+);
+
+CREATE TAG IF NOT EXISTS address(
+    label string NOT NULL,
+    entity_type string NOT NULL,
+    full_address string NOT NULL,
+    city string NULL,
+    country string NULL,
+    risk_score double NULL,
+    confidence double NULL,
+    created_at datetime NULL,
+    updated_at datetime NULL
+);
+
+CREATE TAG IF NOT EXISTS phone(
+    label string NOT NULL,
+    entity_type string NOT NULL,
+    number string NOT NULL,
+    type string NULL,
+    risk_score double NULL,
+    confidence double NULL,
+    created_at datetime NULL,
+    updated_at datetime NULL
+);
+
+CREATE TAG IF NOT EXISTS email(
+    label string NOT NULL,
+    entity_type string NOT NULL,
+    address string NOT NULL,
+    risk_score double NULL,
+    confidence double NULL,
+    created_at datetime NULL,
+    updated_at datetime NULL
+);
+
+CREATE TAG IF NOT EXISTS bank_account(
+    label string NOT NULL,
+    entity_type string NOT NULL,
+    account_number string NOT NULL,
+    bank_name string NULL,
+    iban string NULL,
+    swift string NULL,
+    risk_score double NULL,
+    confidence double NULL,
+    created_at datetime NULL,
+    updated_at datetime NULL
+);
+
+CREATE TAG IF NOT EXISTS transaction(
+    label string NOT NULL,
+    entity_type string NOT NULL,
+    amount double NOT NULL,
+    currency string NULL,
+    transaction_date datetime NULL,
+    description string NULL,
+    risk_score double NULL,
+    confidence double NULL,
+    created_at datetime NULL,
+    updated_at datetime NULL
+);
+
+CREATE TAG IF NOT EXISTS document(
+    label string NOT NULL,
+    entity_type string NOT NULL,
+    title string NOT NULL,
+    document_type string NULL,
+    language string NULL,
+    risk_score double NULL,
+    confidence double NULL,
+    created_at datetime NULL,
+    updated_at datetime NULL
+);
+
+CREATE TAG IF NOT EXISTS country(
+    label string NOT NULL,
+    entity_type string NOT NULL,
+    code string NOT NULL,
+    name string NULL,
+    risk_score double NULL,
+    confidence double NULL,
+    created_at datetime NULL
+);
+
+CREATE TAG IF NOT EXISTS website(
+    label string NOT NULL,
+    entity_type string NOT NULL,
+    url string NOT NULL,
+    risk_score double NULL,
+    confidence double NULL,
+    created_at datetime NULL,
+    updated_at datetime NULL
+);
+
+CREATE TAG IF NOT EXISTS domain(
+    label string NOT NULL,
+    entity_type string NOT NULL,
+    domain_name string NOT NULL,
+    registrar string NULL,
+    risk_score double NULL,
+    confidence double NULL,
+    created_at datetime NULL,
+    updated_at datetime NULL
+);
+
+CREATE TAG IF NOT EXISTS ip_address(
+    label string NOT NULL,
+    entity_type string NOT NULL,
+    ip string NOT NULL,
+    risk_score double NULL,
+    confidence double NULL,
+    created_at datetime NULL
+);
+
+CREATE TAG IF NOT EXISTS crypto_wallet(
+    label string NOT NULL,
+    entity_type string NOT NULL,
+    address string NOT NULL,
+    blockchain string NULL,
+    risk_score double NULL,
+    confidence double NULL,
+    created_at datetime NULL,
+    updated_at datetime NULL
+);
+
+CREATE TAG IF NOT EXISTS sanction_entry(
+    label string NOT NULL,
+    entity_type string NOT NULL,
+    sanction_list string NOT NULL,
+    sanctioned_name string NULL,
+    sanctioned_entity_type string NULL,
+    program string NULL,
+    risk_score double NULL,
+    confidence double NULL,
+    created_at datetime NULL,
+    updated_at datetime NULL
+);
+
+CREATE TAG IF NOT EXISTS watchlist_entry(
+    label string NOT NULL,
+    entity_type string NOT NULL,
+    watchlist_name string NOT NULL,
+    watchlisted_name string NULL,
+    category string NULL,
+    risk_score double NULL,
+    confidence double NULL,
+    created_at datetime NULL,
+    updated_at datetime NULL
+);

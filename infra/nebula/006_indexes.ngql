@@ -1,0 +1,33 @@
+-- Intelligence-domain indexes for search and lookup performance
+
+USE intelligence_graph;
+
+-- Person indexes
+CREATE TAG INDEX IF NOT EXISTS person_label_idx ON person(label(128));
+CREATE TAG INDEX IF NOT EXISTS person_full_name_idx ON person(full_name(128));
+CREATE TAG INDEX IF NOT EXISTS person_passport_idx ON person(passport_number(64));
+CREATE TAG INDEX IF NOT EXISTS person_national_id_idx ON person(national_id(64));
+CREATE TAG INDEX IF NOT EXISTS person_dob_idx ON person(date_of_birth);
+
+-- Company indexes
+CREATE TAG INDEX IF NOT EXISTS company_name_idx ON company(name(128));
+CREATE TAG INDEX IF NOT EXISTS company_registration_idx ON company(registration_number(64));
+
+-- Bank account indexes
+CREATE TAG INDEX IF NOT EXISTS bank_account_number_idx ON bank_account(account_number(64));
+
+-- Email and phone indexes
+CREATE TAG INDEX IF NOT EXISTS email_address_idx ON email(address(64));
+CREATE TAG INDEX IF NOT EXISTS phone_number_idx ON phone(number(64));
+
+-- Domain and IP indexes
+CREATE TAG INDEX IF NOT EXISTS domain_name_idx ON domain(domain_name(128));
+CREATE TAG INDEX IF NOT EXISTS ip_address_idx ON ip_address(ip(64));
+
+-- Sanction and watchlist indexes
+CREATE TAG INDEX IF NOT EXISTS sanction_list_idx ON sanction_entry(sanction_list(64));
+CREATE TAG INDEX IF NOT EXISTS watchlist_name_idx ON watchlist_entry(watchlist_name(64));
+
+-- Transaction indexes
+CREATE TAG INDEX IF NOT EXISTS transaction_date_idx ON transaction(transaction_date);
+CREATE TAG INDEX IF NOT EXISTS transaction_currency_idx ON transaction(currency(8));

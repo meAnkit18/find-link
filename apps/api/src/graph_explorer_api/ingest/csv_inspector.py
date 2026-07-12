@@ -56,11 +56,11 @@ def _infer_type(values: list[str]) -> str:
 
 
 def inspect_csv(path: str, encoding: str = "utf-8-sig") -> InspectionResult:
-    with open(path, "r", encoding=encoding, newline="") as f:
+    with open(path, encoding=encoding, newline="") as f:
         head = f.read(65536)
     delimiter = _sniff_delimiter(head) if head.strip() else ","
 
-    with open(path, "r", encoding=encoding, newline="") as f:
+    with open(path, encoding=encoding, newline="") as f:
         reader = csv.DictReader(f, delimiter=delimiter)
         headers = reader.fieldnames or []
         sample_rows: list[dict[str, str]] = []

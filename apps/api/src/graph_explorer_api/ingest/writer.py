@@ -14,12 +14,12 @@ Handles two operational realities that don't show up in a happy-path demo:
 from __future__ import annotations
 
 import time
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 from graph_core.client import GraphClient
 from graph_core.exceptions import QueryExecutionError
 from graph_core.schema.models import EdgeSchema, PropertyDefinition, TagSchema
-
 from graph_explorer_api.ingest.csv_inspector import ColumnProfile
 
 BATCH_SIZE = 200

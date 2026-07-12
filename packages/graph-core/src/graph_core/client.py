@@ -46,7 +46,7 @@ class GraphClient:
         """Escape hatch for operations not covered by the primitives above."""
         return self._executor.execute(ngql)
 
-    def __enter__(self) -> "GraphClient":
+    def __enter__(self) -> GraphClient:
         self.connect()
         return self
 

@@ -1,0 +1,18 @@
+[project]
+name = "intelligence-schema"
+version = "0.1.0"
+description = "Typed intelligence-domain schema for NebulaGraph — entities, edges, and schema bootstrap"
+requires-python = ">=3.10"
+dependencies = [
+    "graph-core",
+]
+
+[tool.uv.sources]
+graph-core = { workspace = true }
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]

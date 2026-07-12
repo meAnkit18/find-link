@@ -1,0 +1,58 @@
+-- Investigation workflow schema
+-- Cases, notes, saved views, alerts, and reports stored in NebulaGraph.
+
+USE intelligence_graph;
+
+CREATE TAG IF NOT EXISTS investigation_task(
+    title string NOT NULL,
+    description string NULL,
+    status string NOT NULL,
+    priority string NOT NULL,
+    assigned_to string NULL,
+    created_at datetime NOT NULL,
+    updated_at datetime NOT NULL
+);
+
+CREATE TAG IF NOT EXISTS alert(
+    title string NOT NULL,
+    severity string NOT NULL,
+    status string NOT NULL,
+    rule_id string NULL,
+    description string NULL,
+    triggered_at datetime NOT NULL,
+    resolved_at datetime NULL,
+    created_at datetime NOT NULL
+);
+
+CREATE TAG IF NOT EXISTS report(
+    title string NOT NULL,
+    format string NOT NULL,
+    status string NOT NULL,
+    content_json string NULL,
+    generated_by string NOT NULL,
+    generated_at datetime NOT NULL,
+    created_at datetime NOT NULL
+);
+
+-- Investigation edges
+
+CREATE EDGE IF NOT EXISTS HAS_TASK(
+    created_at datetime NOT NULL,
+    assigned_by string NULL
+);
+
+CREATE EDGE IF NOT EXISTS TRIGGERED_ALERT(
+    created_at datetime NOT NULL,
+    confidence double NULL
+);
+
+CREATE EDGE IF NOT EXISTS GENERATED_REPORT(
+    created_at datetime NOT NULL
+);
+
+CREATE EDGE IF NOT EXISTS LINKS_TO(
+    link_type string NOT NULL,
+    description string NULL,
+    confidence double NULL,
+    created_at datetime NOT NULL
+);

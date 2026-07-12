@@ -24,7 +24,7 @@ class GraphOut(BaseModel):
     edge_count: int
 
     @classmethod
-    def from_graph(cls, graph: Graph) -> "GraphOut":
+    def from_graph(cls, graph: Graph) -> GraphOut:
         return cls(
             id=graph.id,
             name=graph.name,

@@ -9,8 +9,12 @@ from pydantic import BaseModel
 
 from graph_core.client import GraphClient
 from graph_core.storage.result import RawVertex
-
-from graph_explorer_api.dependencies import get_clients, get_graph_or_404, get_registry, get_search_index
+from graph_explorer_api.dependencies import (
+    get_clients,
+    get_graph_or_404,
+    get_registry,
+    get_search_index,
+)
 from graph_explorer_api.graph_clients import GraphClientCache
 from graph_explorer_api.graph_registry import GraphRegistry
 from graph_explorer_api.search.index import SearchIndex

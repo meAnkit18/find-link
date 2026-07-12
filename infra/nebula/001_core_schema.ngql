@@ -1,0 +1,138 @@
+-- Core operational schema for the Intelligence Graph Platform
+-- These tags and edges store platform operational state (not intelligence facts).
+-- They remain separate from intelligence-domain tags through naming conventions.
+
+CREATE SPACE IF NOT EXISTS intelligence_graph(
+    vid_type = FIXED_STRING(64)
+);
+
+USE intelligence_graph;
+
+-- Operational tags
+
+CREATE TAG IF NOT EXISTS background_job(
+    job_type string NOT NULL,
+    status string NOT NULL,
+    payload_json string NOT NULL,
+    result_json string NULL,
+    error string NULL,
+    progress int NOT NULL DEFAULT 0,
+    attempt int NOT NULL DEFAULT 0,
+    max_attempts int NOT NULL DEFAULT 3,
+    lease_owner string NULL,
+    lease_expires_at datetime NULL,
+    created_at datetime NOT NULL,
+    started_at datetime NULL,
+    completed_at datetime NULL,
+    updated_at datetime NOT NULL
+);
+
+CREATE TAG IF NOT EXISTS audit_event(
+    event_type string NOT NULL,
+    actor_id string NOT NULL,
+    payload_json string NOT NULL,
+    occurred_at datetime NOT NULL
+);
+
+CREATE TAG IF NOT EXISTS review_item(
+    queue_type string NOT NULL,
+    status string NOT NULL,
+    entity_type string NOT NULL,
+    proposed_action string NOT NULL,
+    payload_json string NOT NULL,
+    confidence double NOT NULL,
+    created_at datetime NOT NULL,
+    reviewed_at datetime NULL,
+    reviewed_by string NULL,
+    decision_reason string NULL
+);
+
+CREATE TAG IF NOT EXISTS investigation_case(
+    title string NOT NULL,
+    status string NOT NULL,
+    priority string NOT NULL,
+    created_by string NOT NULL,
+    created_at datetime NOT NULL,
+    updated_at datetime NOT NULL
+);
+
+CREATE TAG IF NOT EXISTS case_note(
+    body string NOT NULL,
+    author_id string NOT NULL,
+    created_at datetime NOT NULL,
+    updated_at datetime NOT NULL
+);
+
+CREATE TAG IF NOT EXISTS saved_graph_view(
+    name string NOT NULL,
+    state_json string NOT NULL,
+    created_by string NOT NULL,
+    created_at datetime NOT NULL,
+    updated_at datetime NOT NULL
+);
+
+CREATE TAG IF NOT EXISTS search_term(
+    value string NOT NULL,
+    normalized_value string NOT NULL,
+    term_type string NOT NULL,
+    phonetic_key string NULL,
+    created_at datetime NOT NULL
+);
+
+CREATE TAG IF NOT EXISTS platform_setting(
+    key string NOT NULL,
+    value_json string NOT NULL,
+    updated_at datetime NOT NULL
+);
+
+-- Operational edges
+
+CREATE EDGE IF NOT EXISTS PRODUCED(
+    created_at datetime NOT NULL
+);
+
+CREATE EDGE IF NOT EXISTS RECORDED_FOR(
+    created_at datetime NOT NULL
+);
+
+CREATE EDGE IF NOT EXISTS HAS_SUBJECT(
+    subject_role string NOT NULL,
+    added_at datetime NOT NULL,
+    added_by string NOT NULL
+);
+
+CREATE EDGE IF NOT EXISTS HAS_NOTE(
+    created_at datetime NOT NULL
+);
+
+CREATE EDGE IF NOT EXISTS HAS_SAVED_VIEW(
+    created_at datetime NOT NULL
+);
+
+CREATE EDGE IF NOT EXISTS CANDIDATE_MATCH(
+    score double NOT NULL,
+    reasons_json string NOT NULL
+);
+
+CREATE EDGE IF NOT EXISTS PROPOSES_MERGE(
+    confidence double NOT NULL,
+    created_at datetime NOT NULL
+);
+
+CREATE EDGE IF NOT EXISTS GENERATED_REVIEW(
+    created_at datetime NOT NULL
+);
+
+CREATE EDGE IF NOT EXISTS RESOLVES_TO(
+    weight double NOT NULL,
+    source string NOT NULL,
+    confidence double NOT NULL
+);
+
+CREATE EDGE IF NOT EXISTS PERFORMED_BY(
+    created_at datetime NOT NULL
+);
+
+CREATE EDGE IF NOT EXISTS PROCESSES(
+    created_at datetime NOT NULL
+);
