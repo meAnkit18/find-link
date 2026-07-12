@@ -1,296 +1,279 @@
-import { useEffect, useRef, useState } from "react";
-import cytoscape from "cytoscape";
-import fcose from "cytoscape-fcose";
+import { useCallback, useEffect, useRef, useState } from 'react'
+import cytoscape from 'cytoscape'
+import fcose from 'cytoscape-fcose'
+import { api } from '../api/client'
+import type { EntityGraph, EntityGraphNode, EntitySearchHit, RiskResult } from '../api/types'
+import GraphPicker from '../components/common/GraphPicker'
+import JsonView from '../components/common/JsonView'
 
-cytoscape.use(fcose);
+cytoscape.use(fcose)
 
 export function riskColor(level: string): string {
   switch (level) {
-    case "high":
-      return "#DC2626";
-    case "medium":
-      return "#F59E0B";
+    case 'high':
+      return '#DC2626'
+    case 'medium':
+      return '#F59E0B'
     default:
-      return "#10B981";
+      return '#10B981'
   }
 }
 
-interface EntityNode {
-  id: string;
-  label: string;
-  tags: Record<string, unknown>;
-}
-
-interface EntityEdge {
-  src: string;
-  dst: string;
-  edge_type: string;
-  rank: number;
-  properties: Record<string, unknown>;
-}
-
-interface GraphData {
-  nodes: EntityNode[];
-  edges: EntityEdge[];
-}
-
+/** Investigation canvas: search people, load their neighborhood into a
+ * Cytoscape canvas, inspect nodes, see risk scores, expand deeper, and run
+ * shortest-path between two picked nodes. */
 export function InvestigationGraphPage() {
-  const containerRef = useRef<HTMLDivElement | null>(null);
-  const [selectedNode, setSelectedNode] = useState<EntityNode | null>(null);
-  const [graphData, setGraphData] = useState<GraphData | null>(null);
-  const [searchQuery, setSearchQuery] = useState("");
-  const [searchResults, setSearchResults] = useState<EntityNode[]>([]);
-  const [riskLevel, setRiskLevel] = useState<string | null>(null);
-  const [riskFactors, setRiskFactors] = useState<
-    { code: string; explanation: string }[]
-  >([]);
+  const containerRef = useRef<HTMLDivElement | null>(null)
+  const cyRef = useRef<cytoscape.Core | null>(null)
+
+  const [graphId, setGraphId] = useState('')
+  const [searchQuery, setSearchQuery] = useState('')
+  const [entityType, setEntityType] = useState('person')
+  const [searchResults, setSearchResults] = useState<EntitySearchHit[]>([])
+  const [searchError, setSearchError] = useState<string | null>(null)
+
+  const [selectedNode, setSelectedNode] = useState<EntityGraphNode | null>(null)
+  const [risk, setRisk] = useState<RiskResult | null>(null)
+  const [depth, setDepth] = useState(1)
+  const [pathSource, setPathSource] = useState<string | null>(null)
+  const [pathResult, setPathResult] = useState<unknown>(null)
+  const [status, setStatus] = useState<string | null>(null)
+
+  const nodesRef = useRef<Map<string, EntityGraphNode>>(new Map())
 
   useEffect(() => {
-    if (!containerRef.current) return;
+    if (!containerRef.current) return
     const cy = cytoscape({
       container: containerRef.current,
       elements: [],
       style: [
         {
-          selector: "node",
+          selector: 'node',
           style: {
-            label: "data(label)",
-            "background-color": "#3B82F6",
-            color: "#E5E7EB",
-            "text-wrap": "wrap",
-            "text-max-width": 120,
-            "font-size": 10,
+            label: 'data(label)',
+            'background-color': '#3B82F6',
+            color: '#E5E7EB',
+            'text-wrap': 'wrap',
+            'text-max-width': '120px',
+            'font-size': 10,
             width: 40,
             height: 40,
           },
         },
         {
-          selector: "node[risk_color]",
-          style: {
-            "background-color": "data(risk_color)",
-          },
+          selector: 'node:selected',
+          style: { 'border-width': 3, 'border-color': '#F59E0B' },
         },
         {
-          selector: "edge",
+          selector: 'edge',
           style: {
             width: 2,
-            label: "data(label)",
-            "curve-style": "bezier",
-            "line-color": "#475569",
-            "target-arrow-color": "#475569",
-            "target-arrow-shape": "triangle",
-            "font-size": 8,
-            color: "#94A3B8",
+            label: 'data(label)',
+            'curve-style': 'bezier',
+            'line-color': '#475569',
+            'target-arrow-color': '#475569',
+            'target-arrow-shape': 'triangle',
+            'font-size': 8,
+            color: '#94A3B8',
           },
         },
       ],
-      layout: {
-        name: "fcose",
-        animate: true,
-        fit: true,
-      },
-    });
+    })
+    cyRef.current = cy
 
-    cy.on("tap", "node", (evt) => {
-      const node = evt.target;
-      const data = node.data() as unknown as EntityNode;
-      setSelectedNode(data);
-      fetchRisk(data.id);
-    });
+    cy.on('tap', 'node', (evt) => {
+      const id = evt.target.id() as string
+      const node = nodesRef.current.get(id) ?? { id, label: id, tags: {} }
+      setSelectedNode(node)
+    })
+    cy.on('tap', (evt) => {
+      if (evt.target === cy) setSelectedNode(null)
+    })
 
-    cy.on("tap", (evt) => {
-      if (evt.target === cy) {
-        setSelectedNode(null);
-      }
-    });
+    return () => {
+      cy.destroy()
+      cyRef.current = null
+    }
+  }, [])
 
-    return () => cy.destroy();
-  }, []);
-
-  function loadGraph(data: GraphData) {
-    setGraphData(data);
-    const cy = (window as unknown as Record<string, unknown>).__cy as cytoscape.Core | undefined;
-    if (!cy) return;
-    cy.elements().remove();
+  const mergeGraph = useCallback((data: EntityGraph, replace: boolean) => {
+    const cy = cyRef.current
+    if (!cy) return
+    if (replace) {
+      cy.elements().remove()
+      nodesRef.current = new Map()
+    }
     for (const node of data.nodes) {
-      cy.add({
-        group: "nodes",
-        data: {
-          id: node.id,
-          label: node.label || node.id,
-          ...node.tags,
-        },
-      });
+      nodesRef.current.set(node.id, node)
+      if (cy.getElementById(node.id).length === 0) {
+        cy.add({ group: 'nodes', data: { id: node.id, label: node.label || node.id } })
+      }
     }
     for (const edge of data.edges) {
-      cy.add({
-        group: "edges",
-        data: {
-          id: `${edge.src}-${edge.dst}-${edge.edge_type}`,
-          source: edge.src,
-          target: edge.dst,
-          label: edge.edge_type,
-        },
-      });
+      const edgeId = `${edge.src}->${edge.dst}@${edge.edge_type}@${edge.rank}`
+      if (
+        cy.getElementById(edgeId).length === 0 &&
+        cy.getElementById(edge.src).length > 0 &&
+        cy.getElementById(edge.dst).length > 0
+      ) {
+        cy.add({
+          group: 'edges',
+          data: { id: edgeId, source: edge.src, target: edge.dst, label: edge.edge_type },
+        })
+      }
     }
-    cy.layout({ name: "fcose", animate: true, fit: true }).run();
-  }
+    cy.layout({ name: 'fcose' }).run()
+  }, [])
 
   async function handleSearch() {
-    if (!searchQuery.trim()) return;
+    if (!graphId || !searchQuery.trim()) return
+    setSearchError(null)
     try {
-      const res = await fetch(
-        `/api/graphs/default/entities/search?q=${encodeURIComponent(searchQuery)}&entity_type=person`
-      );
-      const data: EntityNode[] = await res.json();
-      setSearchResults(data);
-    } catch {
-      setSearchResults([]);
+      const results = await api.searchEntities(graphId, searchQuery.trim(), entityType.trim() || 'person')
+      setSearchResults(results)
+      if (results.length === 0) setSearchError('No matches.')
+    } catch (err) {
+      setSearchResults([])
+      setSearchError((err as Error).message)
     }
   }
 
-  async function handleSelectResult(entity: EntityNode) {
+  async function loadEntity(entityId: string, replace: boolean) {
+    if (!graphId) return
+    setStatus(`Expanding ${entityId} (depth ${depth})…`)
     try {
-      const res = await fetch(`/api/graphs/default/entities/${entity.entity_id}/graph?depth=1`);
-      const data: GraphData = await res.json();
-      loadGraph(data);
-      setSearchResults([]);
-    } catch {
-      // ignore
+      const data = await api.expandEntityGraph(graphId, entityId, depth)
+      mergeGraph(data, replace)
+      setStatus(null)
+    } catch (err) {
+      setStatus(`✗ ${(err as Error).message}`)
     }
+  }
+
+  async function handleSelectResult(hit: EntitySearchHit) {
+    setSearchResults([])
+    setSearchQuery('')
+    await loadEntity(hit.entity_id, true)
   }
 
   async function fetchRisk(entityId: string) {
+    setRisk(null)
     try {
-      const res = await fetch(`/api/graphs/default/entities/${entityId}/risk/explain`);
-      const data: {
-        level: string;
-        factors: { code: string; explanation: string }[];
-      } = await res.json();
-      setRiskLevel(data.level);
-      setRiskFactors(data.factors || []);
-    } catch {
-      setRiskLevel(null);
-      setRiskFactors([]);
+      setRisk(await api.getEntityRisk(graphId, entityId))
+    } catch (err) {
+      setStatus(`✗ risk: ${(err as Error).message}`)
+    }
+  }
+
+  async function runShortestPath(targetId: string) {
+    if (!pathSource || !graphId) return
+    setStatus(`Path ${pathSource} → ${targetId}…`)
+    try {
+      setPathResult(await api.shortestPath(graphId, pathSource, targetId))
+      setStatus(null)
+    } catch (err) {
+      setStatus(`✗ ${(err as Error).message}`)
+    } finally {
+      setPathSource(null)
     }
   }
 
   return (
-    <div className="explorer-layout">
-      <div className="top-bar">
-        <div className="top-bar-left">
-          <h2>Investigation</h2>
+    <main className="page page--flush explorer">
+      <div className="explorer-topbar">
+        <div className="row" style={{ flex: '0 0 auto' }}>
+          <strong>Investigation</strong>
+          <div style={{ width: 220 }}>
+            <GraphPicker value={graphId} onChange={setGraphId} label="" />
+          </div>
         </div>
-        <div className="top-bar-center">
-          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+        <div className="explorer-topbar__search" style={{ position: 'relative' }}>
+          <div className="row">
             <input
-              type="text"
-              placeholder="Search people..."
+              className="input"
+              style={{ width: 110 }}
+              value={entityType}
+              onChange={(e) => setEntityType(e.target.value)}
+              title="Entity type (tag)"
+            />
+            <input
+              className="input"
+              style={{ flex: 1 }}
+              placeholder={graphId ? 'Search entities by name…' : 'Pick a graph first'}
+              disabled={!graphId}
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && handleSearch()}
-              style={{
-                padding: "6px 12px",
-                borderRadius: 6,
-                border: "1px solid #374151",
-                background: "#1F2937",
-                color: "#E5E7EB",
-                width: 300,
-              }}
+              onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
             />
-            <button onClick={handleSearch} className="btn btn-primary">
+            <button className="btn btn--primary" disabled={!graphId} onClick={handleSearch}>
               Search
             </button>
           </div>
           {searchResults.length > 0 && (
-            <div
-              style={{
-                position: "absolute",
-                top: "100%",
-                left: 0,
-                right: 0,
-                background: "#1F2937",
-                border: "1px solid #374151",
-                borderRadius: 6,
-                zIndex: 100,
-                maxHeight: 300,
-                overflow: "auto",
-              }}
-            >
-              {searchResults.map((result) => (
-                <div
-                  key={result.entity_id}
-                  onClick={() => handleSelectResult(result)}
-                  style={{
-                    padding: "8px 12px",
-                    cursor: "pointer",
-                    borderBottom: "1px solid #374151",
-                  }}
+            <div className="card search-dropdown">
+              {searchResults.map((hit) => (
+                <button
+                  key={hit.entity_id}
+                  className="list-item"
+                  onClick={() => handleSelectResult(hit)}
                 >
-                  {result.label || result.entity_id}
-                </div>
+                  <strong>{hit.label || hit.entity_id}</strong>
+                  <div className="mono muted">{hit.entity_id}</div>
+                </button>
               ))}
             </div>
           )}
         </div>
-        <div className="top-bar-right">
-          <span className="badge badge-primary">Graph Intelligence Platform</span>
-        </div>
+        <label className="row" style={{ gap: 'var(--space-2)' }}>
+          <span className="muted">Depth</span>
+          <select className="select" style={{ width: 90 }} value={depth} onChange={(e) => setDepth(Number(e.target.value))}>
+            <option value={1}>1 hop</option>
+            <option value={2}>2 hops</option>
+            <option value={3}>3 hops</option>
+          </select>
+        </label>
       </div>
 
-      <div className="explorer-body">
-        <div className="explorer-left">
-          <div className="panel">
-            <h3>Filters</h3>
-            <div className="filter-group">
-              <label>Depth</label>
-              <select className="select">
-                <option value="1">1 hop</option>
-                <option value="2">2 hops</option>
-                <option value="3">3 hops</option>
-              </select>
-            </div>
-            <div className="filter-group">
-              <label>Entity Type</label>
-              <div className="checkbox-list">
-                <label><input type="checkbox" defaultChecked /> Person</label>
-                <label><input type="checkbox" defaultChecked /> Company</label>
-                <label><input type="checkbox" defaultChecked /> Address</label>
-                <label><input type="checkbox" defaultChecked /> Phone</label>
-                <label><input type="checkbox" defaultChecked /> Email</label>
-              </div>
-            </div>
-            <div className="filter-group">
-              <label>Risk Level</label>
-              <div className="checkbox-list">
-                <label><input type="checkbox" defaultChecked /> High</label>
-                <label><input type="checkbox" defaultChecked /> Medium</label>
-                <label><input type="checkbox" defaultChecked /> Low</label>
-              </div>
-            </div>
-          </div>
-        </div>
+      {(status || searchError) && (
+        <div className="status-strip">{status ?? searchError}</div>
+      )}
 
+      <div className="explorer-body">
         <div className="explorer-center" ref={containerRef} />
 
         <div className="explorer-right">
           {selectedNode ? (
-            <div className="panel">
+            <div className="panel stack">
               <h3>{selectedNode.label || selectedNode.id}</h3>
-              <p className="text-secondary">ID: {selectedNode.id}</p>
+              <p className="text-secondary mono">{selectedNode.id}</p>
 
-              {riskLevel && (
+              <div className="row" style={{ flexWrap: 'wrap' }}>
+                <button className="btn btn--primary" onClick={() => loadEntity(selectedNode.id, false)}>
+                  Expand
+                </button>
+                <button className="btn" onClick={() => fetchRisk(selectedNode.id)}>
+                  Risk
+                </button>
+                {pathSource && pathSource !== selectedNode.id ? (
+                  <button className="btn" onClick={() => runShortestPath(selectedNode.id)}>
+                    Path from {pathSource.slice(0, 12)}… → here
+                  </button>
+                ) : (
+                  <button className="btn" onClick={() => setPathSource(selectedNode.id)}>
+                    Path: set as source
+                  </button>
+                )}
+              </div>
+
+              {risk && risk.entity_id === selectedNode.id && (
                 <div className="risk-section">
-                  <h4>Risk Assessment</h4>
-                  <div
-                    className="risk-badge"
-                    style={{ background: riskColor(riskLevel), color: "#fff" }}
-                  >
-                    {riskLevel.toUpperCase()}
+                  <h4>Risk assessment</h4>
+                  <div className="risk-badge" style={{ background: riskColor(risk.level), color: '#fff' }}>
+                    {risk.level.toUpperCase()} · {risk.score.toFixed(2)}
                   </div>
-                  {riskFactors.length > 0 && (
+                  {risk.factors.length > 0 && (
                     <ul className="risk-factors">
-                      {riskFactors.map((f, i) => (
+                      {risk.factors.map((f, i) => (
                         <li key={i}>{f.explanation}</li>
                       ))}
                     </ul>
@@ -298,66 +281,29 @@ export function InvestigationGraphPage() {
                 </div>
               )}
 
-              <h4>Properties</h4>
-              <div className="properties-grid">
-                {Object.entries(selectedNode.tags || {}).map(([key, value]) => (
-                  <div key={key} className="property-row">
-                    <span className="property-key">{key}</span>
-                    <span className="property-value">
-                      {typeof value === "object" ? JSON.stringify(value) : String(value)}
-                    </span>
-                  </div>
-                ))}
-              </div>
-
-              <div className="btn-group">
-                <button className="btn btn-primary btn-sm">Expand</button>
-                <button className="btn btn-secondary btn-sm">Shortest Path</button>
-              </div>
+              <h4>Tags / properties</h4>
+              <JsonView data={selectedNode.tags} title="tags" initiallyOpen />
             </div>
           ) : (
             <div className="panel">
-              <h3>Investigation Tools</h3>
+              <h3>Investigation tools</h3>
               <p className="text-secondary">
-                Select a node to view details, risk assessment, and evidence.
+                Pick a graph, search an entity, then click nodes on the canvas
+                to inspect, expand, score risk, or run a shortest path.
               </p>
-              <div className="tool-list">
-                <div className="tool-item">
-                  <strong>Search</strong>
-                  <p>Find people, companies, and entities</p>
-                </div>
-                <div className="tool-item">
-                  <strong>Expand</strong>
-                  <p>Explore connections through graph traversal</p>
-                </div>
-                <div className="tool-item">
-                  <strong>Risk</strong>
-                  <p>Calculate direct and indirect risk scores</p>
-                </div>
-                <div className="tool-item">
-                  <strong>Path</strong>
-                  <p>Find shortest paths between entities</p>
-                </div>
-              </div>
+            </div>
+          )}
+
+          {pathResult !== null && (
+            <div className="panel">
+              <JsonView data={pathResult} title="shortest-path result" />
+              <button className="btn" onClick={() => setPathResult(null)}>
+                Clear
+              </button>
             </div>
           )}
         </div>
       </div>
-
-      <div className="bottom-tray">
-        <div className="tray-tabs">
-          <button className="tray-tab active">Notes</button>
-          <button className="tray-tab">Path Analysis</button>
-          <button className="tray-tab">Suspicious Patterns</button>
-          <button className="tray-tab">Evidence</button>
-        </div>
-        <div className="tray-content">
-          <p className="text-secondary">
-            Use the graph canvas to explore entities. Select a node to see its
-            properties and risk assessment.
-          </p>
-        </div>
-      </div>
-    </div>
-  );
+    </main>
+  )
 }

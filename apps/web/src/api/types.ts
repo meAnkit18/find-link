@@ -81,3 +81,104 @@ export interface Subgraph {
 }
 
 export type Direction = 'out' | 'in' | 'both'
+
+// ---------------------------------------------------------------------------
+// Entities router (/api/graphs/{graph_id}/entities/*)
+// ---------------------------------------------------------------------------
+
+export interface EntitySearchHit {
+  entity_id: string
+  label: string
+  [key: string]: unknown
+}
+
+export interface EntityGraphNode {
+  id: string
+  label: string
+  tags: Record<string, Record<string, unknown>>
+}
+
+export interface EntityGraph {
+  nodes: EntityGraphNode[]
+  edges: GraphEdge[]
+}
+
+export interface PathResult {
+  paths: {
+    vertices: { vid: string; tags: Record<string, unknown> }[]
+    edges: GraphEdge[]
+  }[]
+}
+
+// ---------------------------------------------------------------------------
+// Risk router (/api/risk/*, /api/graphs/{id}/entities/{id}/risk)
+// ---------------------------------------------------------------------------
+
+export interface RiskFactor {
+  code: string
+  weight: number
+  value: number
+  explanation: string
+  evidence_ids: string[]
+}
+
+export interface RiskResult {
+  entity_id: string
+  score: number
+  level: string
+  factors: RiskFactor[]
+}
+
+// The explanation service returns a free-form structure; keep it loose.
+export type RiskExplanation = Record<string, unknown>
+
+// ---------------------------------------------------------------------------
+// Investigations router (/api/cases)
+// ---------------------------------------------------------------------------
+
+export interface CaseSummary {
+  case_id: string
+  title?: string
+  status?: string
+  priority?: string
+  created_by?: string
+  [key: string]: unknown
+}
+
+export interface CaseCreated {
+  case_id: string
+  title: string
+  status: string
+}
+
+export interface SubjectAdded {
+  case_id: string
+  entity_id: string
+  role: string
+}
+
+export interface NoteAdded {
+  note_id: string
+  case_id: string
+}
+
+// ---------------------------------------------------------------------------
+// Review queue router (/api/review-queue)
+// ---------------------------------------------------------------------------
+
+export interface ReviewItem {
+  review_id: string
+  queue_type?: string
+  status?: string
+  [key: string]: unknown
+}
+
+// ---------------------------------------------------------------------------
+// Agent tools router (/api/agent/*)
+// ---------------------------------------------------------------------------
+
+export interface ToolResult {
+  ok: boolean
+  data: Record<string, unknown> | null
+  message: string
+}

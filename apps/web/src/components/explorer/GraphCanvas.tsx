@@ -1,6 +1,5 @@
 import { useEffect, useRef } from 'react'
 import cytoscape, { type Core, type ElementDefinition, type StylesheetStyle } from 'cytoscape'
-// @ts-expect-error - cytoscape-fcose has no bundled types
 import fcose from 'cytoscape-fcose'
 import type { GraphEdge, GraphNode } from '../../api/types'
 
