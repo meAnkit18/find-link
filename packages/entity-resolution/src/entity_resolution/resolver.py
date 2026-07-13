@@ -1,8 +1,103 @@
 from __future__ import annotations
 
-from difflib import SequenceMatcher
+import json
+import os
+import re
 
-from entity_resolution.models import MatchCandidate, ResolutionDecision
+from rapidfuzz import fuzz
+
+from entity_resolution.models import MatchCandidate, ResolutionDecision, ResolutionResult
+from entity_resolution.normalize import compute_deterministic_key
+
+_embedder = None
+_llm_client = None
+
+
+def _get_embedder():
+    global _embedder
+    if _embedder is not None:
+        return _embedder
+    if os.environ.get("ER_USE_EMBEDDINGS", "true").lower() == "true":
+        try:
+            from sentence_transformers import SentenceTransformer
+            model = os.environ.get(
+                "ER_EMBEDDING_MODEL",
+                "sentence-transformers/all-MiniLM-L6-v2",
+            )
+            _embedder = SentenceTransformer(model)
+        except ImportError:
+            pass
+    return _embedder
+
+
+def _get_llm_client():
+    global _llm_client
+    if _llm_client is not None:
+        return _llm_client
+    try:
+        from openai import OpenAI
+        _llm_client = OpenAI(
+            base_url=os.environ.get("LLM_BASE_URL", "https://api.deepseek.com/v1"),
+            api_key=os.environ.get("LLM_API_KEY", "sk-not-set"),
+        )
+    except ImportError:
+        pass
+    return _llm_client
+
+
+def _embedding_similarity(a: str, b: str) -> float:
+    model = _get_embedder()
+    if model is None:
+        return 0.0
+    import numpy as np
+    va, vb = model.encode([a, b], normalize_embeddings=True)
+    return float(np.dot(va, vb))
+
+
+def _llm_adjudicate(
+    mention_type: str, mention_name: str, mention_attrs: dict,
+    candidate_id: str, candidate_type: str, candidate_name: str,
+    candidate_attrs: dict, candidate_aliases: list[str],
+) -> tuple[bool, float]:
+    client = _get_llm_client()
+    if client is None:
+        return False, 0.0
+    system = (
+        "You are an entity-resolution adjudicator for an intelligence "
+        "knowledge graph. Decide if the NEW MENTION and the EXISTING "
+        "ENTITY refer to the same real-world entity. Consider name "
+        "variants, initials, nicknames, transliteration, and whether "
+        "attributes (dob, nationality, employer...) agree or conflict. "
+        "Conflicting hard attributes (different dob, different passport) "
+        'mean DIFFERENT. Respond JSON: {"same": true/false, '
+        '"confidence": 0.0-1.0, "reason": "..."}'
+    )
+    user = (
+        f"NEW MENTION:\n type={mention_type}\n name={mention_name}\n "
+        f"attributes={json.dumps(mention_attrs)}\n\n"
+        f"EXISTING ENTITY:\n type={candidate_type}\n "
+        f"name={candidate_name}\n aliases={json.dumps(candidate_aliases)}\n "
+        f"attributes={json.dumps(candidate_attrs)}"
+    )
+    try:
+        resp = client.chat.completions.create(
+            model=os.environ.get("LLM_MODEL", "deepseek-chat"),
+            temperature=0.0,
+            max_tokens=512,
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+        )
+        raw = resp.choices[0].message.content or "{}"
+        import json as j
+        match = re.search(r"\{.*\}", raw, flags=re.S)
+        if match:
+            verdict = j.loads(match.group(0))
+            return bool(verdict.get("same")), float(verdict.get("confidence", 0.5))
+    except Exception:
+        pass
+    return False, 0.0
 
 
 class EntityResolver:
@@ -20,10 +115,62 @@ class EntityResolver:
 
         best = candidates[0]
         if best.score >= 0.92:
-            return ResolutionDecision(action="merge", entity_id=best.entity_id, candidates=candidates)
+            return ResolutionDecision(
+                action="merge", entity_id=best.entity_id, candidates=candidates,
+            )
         if best.score >= 0.70:
             return ResolutionDecision(action="review", entity_id=None, candidates=candidates)
         return ResolutionDecision(action="create", entity_id=None, candidates=[])
+
+    def resolve_cascade(
+        self, entity_type: str, payload: dict,
+    ) -> ResolutionResult:
+        det_key = compute_deterministic_key(entity_type, payload)
+        if det_key:
+            entity_id = self.search_gateway.find_by_deterministic_key(det_key)
+            if entity_id:
+                self._merge_in_graph(entity_type, entity_id, payload, det_key=det_key)
+                return ResolutionResult(
+                    entity_id=entity_id, is_new=False, method="deterministic", score=1.0,
+                )
+
+        candidates = self._find_candidates(entity_type, payload)
+        if candidates:
+            best_score, best_cand = candidates[0].score, candidates[0]
+            if best_score >= float(os.environ.get("ER_FUZZY_AUTO", "0.93")):
+                self._merge_in_graph(entity_type, best_cand.entity_id, payload)
+                return ResolutionResult(
+                    entity_id=best_cand.entity_id, is_new=False, method="fuzzy", score=best_score,
+                )
+
+            for cand in candidates[:3]:
+                score = best_score
+                emb = _embedding_similarity(
+                    payload.get("label", ""),
+                    cand.entity_id,
+                )
+                score = max(score, emb)
+                if score >= float(os.environ.get("ER_FUZZY_CANDIDATE", "0.75")):
+                    cand_payload = self.search_gateway.get_entity_payload(cand.entity_id)
+                    same, llm_conf = _llm_adjudicate(
+                        mention_type=entity_type,
+                        mention_name=payload.get("label", ""),
+                        mention_attrs=payload,
+                        candidate_id=cand.entity_id,
+                        candidate_type=entity_type,
+                        candidate_name=cand_payload.get("label", ""),
+                        candidate_attrs=cand_payload,
+                        candidate_aliases=cand_payload.get("aliases", []),
+                    )
+                    if same and llm_conf >= 0.7:
+                        self._merge_in_graph(entity_type, cand.entity_id, payload)
+                        return ResolutionResult(
+                            entity_id=cand.entity_id, is_new=False,
+                            method="embedding+llm", score=max(score, llm_conf),
+                        )
+
+        entity_id = self._create_in_graph(entity_type, payload, det_key=det_key)
+        return ResolutionResult(entity_id=entity_id, is_new=True, method="new", score=1.0)
 
     def _try_exact_match(self, entity_type: str, payload: dict) -> MatchCandidate | None:
         passport_number = payload.get("passport_number")
@@ -52,7 +199,7 @@ class EntityResolver:
         scored: list[MatchCandidate] = []
 
         for row in existing:
-            score = SequenceMatcher(None, label.lower(), row["label"].lower()).ratio()
+            score = fuzz.token_sort_ratio(label.lower(), (row.get("label") or "").lower()) / 100.0
             reasons = [f"name similarity={score:.2f}"]
             if (
                 payload.get("date_of_birth")
@@ -69,3 +216,15 @@ class EntityResolver:
 
         scored.sort(key=lambda item: item.score, reverse=True)
         return scored[:5]
+
+    def _merge_in_graph(
+        self, entity_type: str, entity_id: str, payload: dict,
+        det_key: str | None = None,
+    ) -> None:
+        self.search_gateway.merge_entity(entity_type, entity_id, payload)
+
+    def _create_in_graph(
+        self, entity_type: str, payload: dict,
+        det_key: str | None = None,
+    ) -> str:
+        return self.search_gateway.create_entity(entity_type, payload)

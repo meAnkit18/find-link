@@ -1,10 +1,24 @@
 [project]
 name = "entity-resolution"
 version = "0.1.0"
-description = "Entity resolution engine: exact matching, fuzzy matching, multi-field scoring, merge review"
+description = "Entity resolution engine: exact matching, deterministic keys, fuzzy scoring, embedding re-rank, LLM adjudication"
 requires-python = ">=3.10"
 dependencies = [
     "graph-core",
+    "rapidfuzz>=3.10",
+    "phonenumbers>=8.13",
+    "email-validator>=2.2",
+    "pycountry>=24.6",
+    "python-dateutil>=2.9",
+]
+
+[project.optional-dependencies]
+ml = [
+    "sentence-transformers>=3.3",
+]
+llm = [
+    "openai>=1.58",
+    "tenacity>=9.0",
 ]
 
 [tool.uv.sources]

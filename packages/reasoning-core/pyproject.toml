@@ -1,18 +1,26 @@
 [project]
 name = "reasoning-core"
 version = "0.1.0"
-description = "Investigation explanation engine: structured reasoning, evidence-backed summaries, AI-assisted narratives"
+description = "Investigation explanation engine: enrichment, structured reasoning, evidence-backed summaries, AI-assisted narratives"
 requires-python = ">=3.10"
 dependencies = [
     "graph-core",
     "risk-engine",
     "evidence-core",
+    "ingestion-core",
+]
+
+[project.optional-dependencies]
+llm = [
+    "openai>=1.58",
+    "tenacity>=9.0",
 ]
 
 [tool.uv.sources]
 graph-core = { workspace = true }
 risk-engine = { workspace = true }
 evidence-core = { workspace = true }
+ingestion-core = { workspace = true }
 
 [build-system]
 requires = ["setuptools>=68", "wheel"]

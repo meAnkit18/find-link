@@ -5,6 +5,7 @@ description = "Provenance and traceability: evidence records, citations, source 
 requires-python = ">=3.10"
 dependencies = [
     "graph-core",
+    "sqlalchemy>=2.0",
 ]
 
 [tool.uv.sources]

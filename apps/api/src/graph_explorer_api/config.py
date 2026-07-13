@@ -1,9 +1,3 @@
-"""Environment-driven settings for the Graph Explorer API.
-
-Kept as a single plain class (no pydantic-settings dependency) since the
-env-var surface is small and unlikely to grow much in Phase 1.
-"""
-
 from __future__ import annotations
 
 import os
@@ -12,10 +6,6 @@ from pathlib import Path
 
 from graph_core.config import GraphConfig
 
-# Space used for space-administration operations only (create/list/drop
-# spaces). Metadata's space methods run with use_space=False, so this name
-# is never actually USE'd or required to exist — it only has to satisfy
-# GraphConfig's identifier validation.
 ADMIN_SPACE = "graph_explorer_admin"
 
 
@@ -27,6 +17,8 @@ class Settings:
     nebula_password: str
     nebula_use_ssl: bool
     data_dir: Path
+    database_url: str
+    evidence_dir: str
 
     def build_config(self, space: str) -> GraphConfig:
         return GraphConfig(
@@ -55,7 +47,10 @@ def load_settings() -> Settings:
         nebula_password=os.environ.get("NEBULA_PASSWORD", "nebula"),
         nebula_use_ssl=os.environ.get("NEBULA_USE_SSL", "false").lower() == "true",
         data_dir=data_dir,
+        database_url=os.environ.get("EVIDENCE_DATABASE_URL", "sqlite:///./evidence_store.db"),
+        evidence_dir=os.environ.get("EVIDENCE_DIR", "./evidence_store"),
     )
     settings.data_dir.mkdir(parents=True, exist_ok=True)
     settings.uploads_dir.mkdir(parents=True, exist_ok=True)
+    Path(settings.evidence_dir).mkdir(parents=True, exist_ok=True)
     return settings

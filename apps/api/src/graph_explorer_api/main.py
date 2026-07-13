@@ -13,6 +13,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from evidence_core.database import init_db as init_evidence_db
 from graph_explorer_api.config import load_settings
 from graph_explorer_api.graph_clients import GraphClientCache
 from graph_explorer_api.graph_registry import GraphRegistry
@@ -20,6 +21,7 @@ from graph_explorer_api.ingest.jobs import ImportJobRunner
 from graph_explorer_api.routers import (
     agent_tools,
     entities,
+    evidence,
     explorer,
     graphs,
     imports,
@@ -41,6 +43,8 @@ async def lifespan(app: FastAPI):
     app.state.clients = GraphClientCache(settings)
     app.state.jobs = ImportJobRunner()
     app.state.search_index = SearchIndex()
+
+    init_evidence_db()
 
     default_client = app.state.clients.for_space("intelligence_graph")
     app.state.graph_service = GraphService(default_client)
@@ -66,6 +70,7 @@ def create_app() -> FastAPI:
     app.include_router(entities.router)
     app.include_router(investigations.router)
     app.include_router(ingestion.router)
+    app.include_router(evidence.router)
     app.include_router(risk.router)
     app.include_router(review.router)
     app.include_router(agent_tools.router)

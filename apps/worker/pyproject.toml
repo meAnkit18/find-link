@@ -9,6 +9,10 @@ dependencies = [
     "entity-resolution",
     "risk-engine",
     "evidence-core",
+    "celery[redis]>=5.4",
+    "sqlalchemy>=2.0",
+    "psycopg2-binary>=2.9",
+    "intelligence-schema",
 ]
 
 [tool.uv.sources]
@@ -17,6 +21,7 @@ ingestion-core = { workspace = true }
 entity-resolution = { workspace = true }
 risk-engine = { workspace = true }
 evidence-core = { workspace = true }
+intelligence-schema = { workspace = true }
 
 [build-system]
 requires = ["setuptools>=68", "wheel"]
