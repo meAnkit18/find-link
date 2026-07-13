@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import JSON, Column, DateTime, Float, Index, Integer, String, Text
+from sqlalchemy import JSON, Boolean, Column, DateTime, Float, Index, Integer, String, Text
 
 from evidence_core.database import Base
 
@@ -28,6 +28,7 @@ class Evidence(Base):
     uploaded_by = Column(String(128), default="anonymous")
     uploaded_at = Column(DateTime(timezone=True), default=utcnow)
     status = Column(String(32), default="uploaded")
+    cancel_requested = Column(Boolean, default=False, nullable=False)
     error = Column(Text, nullable=True)
     extraction_json = Column(JSON, nullable=True)
     processing_log = Column(JSON, default=list)

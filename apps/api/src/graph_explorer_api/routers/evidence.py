@@ -26,6 +26,11 @@ router = APIRouter(prefix="/api/evidence", tags=["evidence"])
 
 INTEL_GRAPH_NAME = "Intelligence Graph"
 
+# Statuses where the pipeline is (or may still be) running.
+ACTIVE_STATUSES = {"uploaded", "queued", "parsed", "extracted", "resolved", "written"}
+# Statuses where the pipeline is definitively finished.
+TERMINAL_STATUSES = {"enriched", "failed", "cancelled"}
+
 _EXECUTOR = ThreadPoolExecutor(
     max_workers=int(os.environ.get("INGEST_WORKERS", "2")),
     thread_name_prefix="ingest",
@@ -111,7 +116,7 @@ def ingest_text(body: TextIn, request: Request, db: Session = Depends(get_db)): 
     sha256 = hashlib.sha256(text.encode()).hexdigest()
     existing = db.query(Evidence).filter(
         Evidence.sha256 == sha256,
-        Evidence.status != "failed",
+        Evidence.status.notin_(["failed", "cancelled"]),
     ).first()
     if existing:
         return {"evidence_id": existing.id, "status": existing.status, "note": "duplicate"}
@@ -151,7 +156,7 @@ def ingest_file(
 
     existing = db.query(Evidence).filter(
         Evidence.sha256 == sha256,
-        Evidence.status != "failed",
+        Evidence.status.notin_(["failed", "cancelled"]),
     ).first()
     if existing:
         return {"evidence_id": existing.id, "status": existing.status, "note": "duplicate"}
@@ -195,8 +200,12 @@ def list_evidence(
             "source_name": ev.source_name,
             "source_type": ev.source_type,
             "status": ev.status,
+            "cancel_requested": bool(ev.cancel_requested),
             "uploaded_at": ev.uploaded_at,
             "error": ev.error,
+            # last processing_log entry → lets the list show live internal
+            # activity without the client fetching every detail record
+            "last_log": (ev.processing_log or [None])[-1],
         }
         for ev in rows
     ]
@@ -216,6 +225,7 @@ def get_evidence(evidence_id: str, db: Session = Depends(get_db)):  # noqa: B008
         "uploaded_by": ev.uploaded_by,
         "uploaded_at": ev.uploaded_at,
         "status": ev.status,
+        "cancel_requested": bool(ev.cancel_requested),
         "error": ev.error,
         "processing_log": ev.processing_log,
         "extraction": ev.extraction_json,
@@ -233,14 +243,148 @@ def retry_evidence(evidence_id: str, request: Request, db: Session = Depends(get
     ev = db.get(Evidence, evidence_id)
     if not ev:
         raise HTTPException(404, "unknown evidence id")
-    if ev.status != "failed":
-        raise HTTPException(409, f"evidence is '{ev.status}', only failed items can be retried")
+    if ev.status not in ("failed", "cancelled"):
+        raise HTTPException(
+            409,
+            f"evidence is '{ev.status}', only failed or cancelled items can be retried",
+        )
     ev.status = "uploaded"
     ev.error = None
+    ev.cancel_requested = False
+    log = list(ev.processing_log or [])
+    log.append({"stage": "retry", "at": utcnow().isoformat(),
+                "detail": "pipeline restarted by user"})
+    ev.processing_log = log
     db.add(ev)
     db.commit()
     _dispatch_pipeline(evidence_id, request)
     return {"evidence_id": evidence_id, "status": "queued"}
+
+
+@router.post("/{evidence_id}/cancel")
+def cancel_evidence(evidence_id: str, db: Session = Depends(get_db)):  # noqa: B008
+    """Ask the pipeline to stop this evidence.
+
+    The flag is checked at every stage boundary, so a running stage finishes
+    its own work and the item then flips to `cancelled`. Items still waiting
+    in the queue are cancelled the moment they would have started.
+    """
+    ev = db.get(Evidence, evidence_id)
+    if not ev:
+        raise HTTPException(404, "unknown evidence id")
+    if ev.status in TERMINAL_STATUSES:
+        raise HTTPException(409, f"evidence already finished with status '{ev.status}'")
+    if not ev.cancel_requested:
+        ev.cancel_requested = True
+        log = list(ev.processing_log or [])
+        log.append({"stage": "cancel", "at": utcnow().isoformat(),
+                    "detail": "stop requested by user — will halt at the next stage boundary"})
+        ev.processing_log = log
+        db.add(ev)
+        db.commit()
+    return {"evidence_id": evidence_id, "status": ev.status, "cancel_requested": True}
+
+
+@router.delete("/{evidence_id}")
+def delete_evidence(
+    evidence_id: str,
+    request: Request,
+    force: bool = False,
+    db: Session = Depends(get_db),  # noqa: B008
+):
+    """Delete an evidence item and everything derived from it.
+
+    Removes: the evidence row, its stored file, its facts and review items,
+    its id from every EntityRegistry row (deleting registry entries that
+    were supported *only* by this evidence), and — best effort — its
+    evidence vertex and orphaned entity vertices in the graph.
+
+    If the pipeline is still running, refuse unless ?force=true, in which
+    case the cancel flag is set so any in-flight step stops safely (steps
+    treat a deleted row as a cancellation).
+    """
+    ev = db.get(Evidence, evidence_id)
+    if not ev:
+        raise HTTPException(404, "unknown evidence id")
+    if ev.status in ACTIVE_STATUSES and not force:
+        raise HTTPException(
+            409,
+            "pipeline is still running — press Stop first (or call this "
+            "endpoint with ?force=true)",
+        )
+    if ev.status in ACTIVE_STATUSES:
+        ev.cancel_requested = True
+        db.add(ev)
+        db.commit()
+
+    # 1) collect the registry entities this evidence touched
+    facts = db.query(Fact).filter(Fact.evidence_id == evidence_id).all()
+    touched_entity_ids: set[str] = set()
+    for f in facts:
+        for eid in (f.resolved_entity_id, f.resolved_source_id, f.resolved_target_id):
+            if eid:
+                touched_entity_ids.add(eid)
+
+    # 2) delete review items + facts
+    review_deleted = (
+        db.query(ReviewItem)
+        .filter(ReviewItem.evidence_id == evidence_id)
+        .delete(synchronize_session=False)
+    )
+    facts_deleted = (
+        db.query(Fact)
+        .filter(Fact.evidence_id == evidence_id)
+        .delete(synchronize_session=False)
+    )
+
+    # 3) scrub this evidence id from the registry; drop entities that were
+    #    supported only by this evidence
+    orphaned_registry_ids: list[str] = []
+    for eid in touched_entity_ids:
+        reg = db.get(EntityRegistry, eid)
+        if reg is None:
+            continue
+        remaining = [x for x in (reg.evidence_ids or []) if x != evidence_id]
+        if remaining:
+            reg.evidence_ids = remaining
+            db.add(reg)
+        else:
+            orphaned_registry_ids.append(reg.id)
+            db.delete(reg)
+
+    # 4) delete the stored file (if any)
+    if ev.stored_path:
+        try:
+            Path(ev.stored_path).unlink(missing_ok=True)
+        except OSError:
+            logger.warning("could not delete stored file %s", ev.stored_path)
+
+    # 5) delete the evidence row itself
+    db.delete(ev)
+    db.commit()
+
+    # 6) best-effort graph cleanup (never fails the request)
+    graph_cleaned = False
+    try:
+        settings: Settings = request.app.state.settings
+        clients: GraphClientCache = request.app.state.clients
+        client = clients.for_space(settings.nebula_space)
+        client.execute_raw(f'DELETE VERTEX "{evidence_id}" WITH EDGE')
+        for eid in orphaned_registry_ids:
+            client.execute_raw(f'DELETE VERTEX "{eid}" WITH EDGE')
+        request.app.state.search_index.invalidate(settings.nebula_space)
+        graph_cleaned = True
+    except Exception:
+        logger.exception("graph cleanup for evidence %s failed (non-fatal)", evidence_id)
+
+    return {
+        "ok": True,
+        "evidence_id": evidence_id,
+        "facts_deleted": facts_deleted,
+        "review_items_deleted": review_deleted,
+        "registry_entities_deleted": len(orphaned_registry_ids),
+        "graph_cleaned": graph_cleaned,
+    }
 
 
 # ------------------------------------------------------------- review queue

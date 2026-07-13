@@ -9,6 +9,22 @@ Evidence.status. On failure the step marks the evidence `failed` with the
 stage and error, then re-raises (so Celery retries still work and the inline
 runner stops the chain).
 
+Cancellation
+------------
+Users can request a stop (`Evidence.cancel_requested = True`, set by
+POST /api/evidence/{id}/cancel). Every step checks the flag before doing any
+work; if it is set — or the evidence row has been deleted — the step raises
+PipelineCancelled, marks the row `cancelled`, and the chain stops. A step
+that is already mid-flight finishes its own work, so cancellation takes
+effect at the next stage boundary (at most a few seconds for everything
+except a slow LLM extraction call).
+
+Observability
+-------------
+Every step now appends BOTH a "started" and a "finished (N.Ns)" entry to
+Evidence.processing_log, so the UI can stream exactly what the pipeline is
+doing in real time, including per-stage durations.
+
 Entity resolution here is what makes repeated ingestion *enrich* the graph
 instead of duplicating it:
   1. deterministic keys (normalized email/phone/passport/IBAN/plate/ISO2)
@@ -17,12 +33,13 @@ instead of duplicating it:
        score >= ER_FUZZY_AUTO      -> merge into the existing entity
        score >= ER_FUZZY_CANDIDATE -> create, but open a merge-suggestion
                                       review item so a human can link them
-       otherwise                   -> create a new entity
+      otherwise                   -> create a new entity
 """
 
 from __future__ import annotations
 
 import os
+import time
 from typing import Callable
 
 from sqlalchemy.orm import Session
@@ -30,6 +47,10 @@ from sqlalchemy.orm import Session
 from evidence_core.config import get_settings
 from evidence_core.database import SessionLocal, init_db
 from evidence_core.db_models import EntityRegistry, Evidence, Fact, ReviewItem, utcnow
+
+
+class PipelineCancelled(Exception):
+    """Raised when the user asked to stop this evidence, or deleted it."""
 
 
 # --------------------------------------------------------------------------- helpers
@@ -48,6 +69,25 @@ def _fail(db: Session, ev: Evidence | None, stage: str, exc: Exception) -> None:
     _log(ev, stage, f"FAILED: {exc}")
     db.add(ev)
     db.commit()
+
+
+def _load_checked(db: Session, evidence_id: str, stage: str) -> Evidence:
+    """Load the evidence row, honouring cancellation / deletion.
+
+    Raises PipelineCancelled if the row is gone (deleted while queued/running)
+    or the user requested a stop. In the cancel case the row is marked
+    `cancelled` and the request is committed before raising.
+    """
+    ev = db.get(Evidence, evidence_id)
+    if ev is None:
+        raise PipelineCancelled(f"{stage}: evidence row was deleted")
+    if ev.cancel_requested:
+        ev.status = "cancelled"
+        _log(ev, stage, "stopped by user before this stage ran")
+        db.add(ev)
+        db.commit()
+        raise PipelineCancelled(f"{stage}: stopped by user")
+    return ev
 
 
 def _graph_client():
@@ -100,9 +140,12 @@ def step_parse(evidence_id: str) -> None:
 
     db = SessionLocal()
     try:
-        ev = db.get(Evidence, evidence_id)
-        if ev is None:
-            raise ValueError(f"unknown evidence id {evidence_id!r}")
+        ev = _load_checked(db, evidence_id, "parse")
+        _log(ev, "parse", f"started ({ev.source_type} source)")
+        db.add(ev)
+        db.commit()
+        t0 = time.monotonic()
+
         if ev.source_type == "text":
             raw = ev.raw_text or ""
             hint = "Raw text input."
@@ -120,9 +163,12 @@ def step_parse(evidence_id: str) -> None:
         meta = dict(ev.extraction_json or {})
         meta["structured_hint"] = hint
         ev.extraction_json = meta
-        _log(ev, "parse", f"{len(raw)} chars extracted")
+        _log(ev, "parse", f"{len(raw)} chars extracted ({time.monotonic() - t0:.1f}s)")
         db.add(ev)
         db.commit()
+    except PipelineCancelled:
+        db.rollback()
+        raise
     except Exception as exc:
         db.rollback()
         _fail(db, db.get(Evidence, evidence_id), "parse", exc)
@@ -139,26 +185,36 @@ def step_extract(evidence_id: str) -> None:
 
     db = SessionLocal()
     try:
-        ev = db.get(Evidence, evidence_id)
+        ev = _load_checked(db, evidence_id, "extract")
         key = os.environ.get("LLM_API_KEY", "")
         if not key or key == "sk-not-set":
             raise RuntimeError(
                 "LLM_API_KEY is not configured — set it in your environment/.env "
                 "(the extraction step needs an OpenAI-compatible LLM endpoint)"
             )
+        _log(ev, "extract", "started (calling LLM — this is the slow stage)")
+        db.add(ev)
+        db.commit()
+        t0 = time.monotonic()
+
         hint = (ev.extraction_json or {}).get("structured_hint", "")
         result = ex.extract(evidence_id, ev.raw_text or "", hint)
-        dropped = 0
+        before = len(result.entities) + len(result.relationships)
         result = normalize_extraction(result)
+        dropped = before - (len(result.entities) + len(result.relationships))
         ev.extraction_json = result.model_dump(mode="json")
         ev.status = "extracted"
         _log(
             ev, "extract",
             f"{len(result.entities)} entities, {len(result.relationships)} "
-            f"relationships (dropped {dropped} invalid)",
+            f"relationships (dropped {dropped} invalid, "
+            f"{time.monotonic() - t0:.1f}s)",
         )
         db.add(ev)
         db.commit()
+    except PipelineCancelled:
+        db.rollback()
+        raise
     except Exception as exc:
         db.rollback()
         _fail(db, db.get(Evidence, evidence_id), "extract", exc)
@@ -222,8 +278,15 @@ def step_resolve(evidence_id: str) -> None:
 
     db = SessionLocal()
     try:
-        ev = db.get(Evidence, evidence_id)
-        result = ExtractionResult(**ev.extraction_json)
+        ev = _load_checked(db, evidence_id, "resolve")
+        result = ExtractionResult(**(ev.extraction_json or {}))
+        _log(
+            ev, "resolve",
+            f"started (matching {len(result.entities)} mentions against the registry)",
+        )
+        db.add(ev)
+        db.commit()
+        t0 = time.monotonic()
 
         local_to_canonical: dict[str, str] = {}
         merged, created, suggested = 0, 0, 0
@@ -332,10 +395,14 @@ def step_resolve(evidence_id: str) -> None:
         _log(
             ev, "resolve",
             f"{merged} merged into existing entities, {created} created, "
-            f"{suggested} merge suggestions queued",
+            f"{suggested} merge suggestions queued "
+            f"({time.monotonic() - t0:.1f}s)",
         )
         db.add(ev)
         db.commit()
+    except PipelineCancelled:
+        db.rollback()
+        raise
     except Exception as exc:
         db.rollback()
         _fail(db, db.get(Evidence, evidence_id), "resolve", exc)
@@ -350,13 +417,19 @@ def step_write(evidence_id: str) -> tuple[int, int]:
     from intelligence_schema.graph_writer import GraphWriter
     from intelligence_schema.ingest_schema import ensure_ingest_schema
 
-    client = _graph_client()
     db = SessionLocal()
+    client = None
     try:
+        ev = _load_checked(db, evidence_id, "write")
+        _log(ev, "write", "started (projecting accepted facts into the graph)")
+        db.add(ev)
+        db.commit()
+        t0 = time.monotonic()
+
+        client = _graph_client()
         space = os.environ.get("NEBULA_SPACE", "intelligence_graph")
         ensure_ingest_schema(client, space)
 
-        ev = db.get(Evidence, evidence_id)
         writer = GraphWriter(client)
 
         writer.upsert_evidence(
@@ -406,17 +479,25 @@ def step_write(evidence_id: str) -> tuple[int, int]:
             db.add(fact)
 
         ev.status = "written"
-        _log(ev, "write", f"{entities_written} entities, {edges_written} edges projected")
+        _log(
+            ev, "write",
+            f"{entities_written} entities, {edges_written} edges projected "
+            f"({time.monotonic() - t0:.1f}s)",
+        )
         db.add(ev)
         db.commit()
         return entities_written, edges_written
+    except PipelineCancelled:
+        db.rollback()
+        raise
     except Exception as exc:
         db.rollback()
         _fail(db, db.get(Evidence, evidence_id), "write", exc)
         raise
     finally:
         db.close()
-        client.close()
+        if client is not None:
+            client.close()
 
 
 # --------------------------------------------------------------------------- step 5: enrich
@@ -428,7 +509,8 @@ def step_enrich(evidence_id: str) -> None:
     db = SessionLocal()
     client = None
     try:
-        ev = db.get(Evidence, evidence_id)
+        ev = _load_checked(db, evidence_id, "enrich")
+
         entity_ids = sorted({
             f.resolved_entity_id
             for f in db.query(Fact).filter(
@@ -439,7 +521,16 @@ def step_enrich(evidence_id: str) -> None:
             if f.resolved_entity_id
         })
         if not entity_ids:
+            ev.status = "enriched"
+            _log(ev, "enrich", "skipped (no written entities to enrich)")
+            db.add(ev)
+            db.commit()
             return
+
+        _log(ev, "enrich", f"started (inferring around {len(entity_ids)} entities)")
+        db.add(ev)
+        db.commit()
+        t0 = time.monotonic()
 
         client = _graph_client()
         writer = GraphWriter(client)
@@ -473,13 +564,20 @@ def step_enrich(evidence_id: str) -> None:
             db.add(fact)
 
         ev.status = "enriched"
-        _log(ev, "enrich", f"{n} inference proposals generated")
+        _log(
+            ev, "enrich",
+            f"{n} inference proposals generated ({time.monotonic() - t0:.1f}s)",
+        )
         db.add(ev)
         db.commit()
+    except PipelineCancelled:
+        db.rollback()
+        raise
     except Exception as exc:
         db.rollback()
         ev = db.get(Evidence, evidence_id)
         if ev is not None:
+            ev.status = "enriched"  # enrichment is best-effort; don't fail the run
             _log(ev, "enrich", f"skipped (non-fatal): {exc}")
             db.add(ev)
             db.commit()
@@ -496,13 +594,17 @@ def run_pipeline_inline(
     on_written: Callable[[tuple[int, int]], None] | None = None,
 ) -> None:
     init_db()
-    step_parse(evidence_id)
-    step_extract(evidence_id)
-    step_resolve(evidence_id)
-    counts = step_write(evidence_id)
-    if on_written is not None:
-        try:
-            on_written(counts)
-        except Exception:
-            pass
-    step_enrich(evidence_id)
+    try:
+        step_parse(evidence_id)
+        step_extract(evidence_id)
+        step_resolve(evidence_id)
+        counts = step_write(evidence_id)
+        if on_written is not None:
+            try:
+                on_written(counts)
+            except Exception:
+                pass
+        step_enrich(evidence_id)
+    except PipelineCancelled:
+        # Row already marked `cancelled` (or deleted) — stop quietly.
+        return

@@ -194,14 +194,18 @@ export type EvidenceStatus =
   | 'written'
   | 'enriched'
   | 'failed'
+  | 'cancelled'
 
 export interface EvidenceSummary {
   id: string
   source_name: string
   source_type: string
   status: EvidenceStatus
+  cancel_requested?: boolean
   uploaded_at: string
   error: string | null
+  /** Latest processing_log entry — lets the list show live pipeline activity. */
+  last_log?: ProcessingLogEntry | null
 }
 
 export interface EvidenceFact {
@@ -240,6 +244,7 @@ export interface ExtractedRelationshipOut {
 export interface EvidenceDetail extends EvidenceSummary {
   sha256: string
   uploaded_by: string
+  cancel_requested?: boolean
   processing_log: ProcessingLogEntry[] | null
   extraction: {
     entities?: ExtractedEntityOut[]
@@ -254,6 +259,21 @@ export interface IngestResponse {
   status: string
   source_type?: string
   note?: string
+}
+
+export interface CancelEvidenceResponse {
+  evidence_id: string
+  status: string
+  cancel_requested: boolean
+}
+
+export interface DeleteEvidenceResponse {
+  ok: boolean
+  evidence_id: string
+  facts_deleted: number
+  review_items_deleted: number
+  registry_entities_deleted: number
+  graph_cleaned: boolean
 }
 
 export interface FactReviewItem {

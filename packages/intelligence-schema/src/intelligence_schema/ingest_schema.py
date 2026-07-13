@@ -114,6 +114,37 @@ def ensure_ingest_schema(client, space: str) -> None:
             PropertyDefinition("created_at", "int64", nullable=True),
         ]))
 
+        # Additional schemas for investigations and review queue
+        client.metadata.create_tag(TagSchema(name="review_item", properties=[
+            PropertyDefinition("queue_type", "string", nullable=True),
+            PropertyDefinition("status", "string", nullable=True),
+            PropertyDefinition("reviewed_at", "datetime", nullable=True),
+            PropertyDefinition("reviewed_by", "string", nullable=True),
+            PropertyDefinition("decision_reason", "string", nullable=True),
+        ]))
+        client.metadata.create_tag(TagSchema(name="investigation_case", properties=[
+            PropertyDefinition("title", "string", nullable=True),
+            PropertyDefinition("status", "string", nullable=True),
+            PropertyDefinition("priority", "string", nullable=True),
+            PropertyDefinition("created_by", "string", nullable=True),
+            PropertyDefinition("created_at", "datetime", nullable=True),
+            PropertyDefinition("updated_at", "datetime", nullable=True),
+        ]))
+        client.metadata.create_tag(TagSchema(name="case_note", properties=[
+            PropertyDefinition("body", "string", nullable=True),
+            PropertyDefinition("author_id", "string", nullable=True),
+            PropertyDefinition("created_at", "datetime", nullable=True),
+            PropertyDefinition("updated_at", "datetime", nullable=True),
+        ]))
+        client.metadata.create_edge_type(EdgeSchema(name="HAS_SUBJECT", properties=[
+            PropertyDefinition("subject_role", "string", nullable=True),
+            PropertyDefinition("added_at", "datetime", nullable=True),
+            PropertyDefinition("added_by", "string", nullable=True),
+        ]))
+        client.metadata.create_edge_type(EdgeSchema(name="HAS_NOTE", properties=[
+            PropertyDefinition("created_at", "datetime", nullable=True),
+        ]))
+
         _verify_uniform(client, space)
         _ensured.add(space)
 

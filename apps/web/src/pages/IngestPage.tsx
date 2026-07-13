@@ -2,55 +2,145 @@ import { useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import { api } from '../api/client'
-import type { EvidenceDetail, EvidenceSummary } from '../api/types'
+import type { EvidenceDetail, EvidenceSummary, ProcessingLogEntry } from '../api/types'
 
 const INTEL_GRAPH_ID = 'intelligence_graph'
 
 const STAGES = ['parsed', 'extracted', 'resolved', 'written', 'enriched'] as const
+const STAGE_VERBS = ['parse', 'extract', 'resolve', 'write', 'enrich'] as const
 const ACTIVE = new Set(['uploaded', 'queued', 'parsed', 'extracted', 'resolved', 'written'])
+const TERMINAL = new Set(['enriched', 'failed', 'cancelled'])
 const ACCEPT =
   '.pdf,.docx,.txt,.md,.log,.csv,.tsv,.png,.jpg,.jpeg,.tif,.tiff,.bmp,.webp'
 
 function stageIndex(status: string): number {
-  const i = STAGES.indexOf(status as (typeof STAGES)[number])
-  return i
+  return STAGES.indexOf(status as (typeof STAGES)[number])
 }
 
-function StatusChip({ status }: { status: string }) {
+/** Which stage did a failed item die in? The error is "stage: message". */
+function failedStageIndex(error: string | null | undefined): number {
+  if (!error) return -1
+  const prefix = error.split(':')[0]?.trim()
+  return STAGE_VERBS.indexOf(prefix as (typeof STAGE_VERBS)[number])
+}
+
+function fmtTime(iso: string): string {
+  try {
+    return new Date(iso).toLocaleTimeString()
+  } catch {
+    return iso
+  }
+}
+
+function StatusChip({ status, cancelRequested }: { status: string; cancelRequested?: boolean }) {
+  const stopping = cancelRequested && ACTIVE.has(status)
   const color =
     status === 'failed'
       ? 'var(--color-danger)'
-      : status === 'enriched' || status === 'written'
-        ? 'var(--color-success, #2e7d32)'
-        : 'var(--color-primary)'
+      : status === 'cancelled' || stopping
+        ? 'var(--color-muted, #888)'
+        : status === 'enriched' || status === 'written'
+          ? 'var(--color-success, #2e7d32)'
+          : 'var(--color-primary)'
   return (
     <span
       className="badge"
       style={{ borderColor: color, color, display: 'inline-flex', gap: 6, alignItems: 'center' }}
     >
       {ACTIVE.has(status) && <span className="spinner" style={{ width: 10, height: 10 }} />}
-      {status}
+      {stopping ? `${status} — stopping…` : status}
     </span>
   )
 }
 
-function PipelineProgress({ status }: { status: string }) {
+/**
+ * Live stage strip: completed stages are lit, the stage the pipeline is
+ * currently in gets a spinner, and for failed items the stage that broke is
+ * shown in red.
+ */
+function PipelineProgress({ status, error }: { status: string; error?: string | null }) {
   const reached = stageIndex(status)
+  const failedAt = status === 'failed' ? failedStageIndex(error) : -1
+  const runningIdx = ACTIVE.has(status) ? reached + 1 : -1
   return (
     <div className="row" style={{ gap: 4, flexWrap: 'wrap' }}>
       {STAGES.map((stage, i) => {
-        const done = status === 'failed' ? false : reached >= i
+        const done = failedAt >= 0 ? i < failedAt : reached >= i
+        const isRunning = i === runningIdx && runningIdx < STAGES.length
+        const isFailed = i === failedAt
+        const border = isFailed
+          ? 'var(--color-danger)'
+          : done || isRunning
+            ? 'var(--color-primary)'
+            : 'var(--color-border)'
         return (
           <span
             key={stage}
             className="badge"
             style={{
-              opacity: done ? 1 : 0.35,
-              borderColor: done ? 'var(--color-primary)' : 'var(--color-border)',
+              opacity: done || isRunning || isFailed ? 1 : 0.35,
+              borderColor: border,
+              color: isFailed ? 'var(--color-danger)' : undefined,
+              display: 'inline-flex',
+              gap: 4,
+              alignItems: 'center',
             }}
           >
+            {isRunning && <span className="spinner" style={{ width: 8, height: 8 }} />}
             {i + 1}. {stage}
+            {isFailed && ' ✕'}
           </span>
+        )
+      })}
+    </div>
+  )
+}
+
+/** Always-visible, auto-updating log of everything the pipeline is doing. */
+function LiveLog({ log, active }: { log: ProcessingLogEntry[]; active: boolean }) {
+  if (log.length === 0) {
+    return (
+      <p className="muted" style={{ margin: 0 }}>
+        {active ? 'Waiting for the pipeline to pick this up…' : 'No processing activity recorded.'}
+      </p>
+    )
+  }
+  return (
+    <div
+      style={{
+        fontFamily: 'var(--font-mono, monospace)',
+        fontSize: '0.85em',
+        background: 'var(--color-surface-2, rgba(0,0,0,0.04))',
+        border: '1px solid var(--color-border)',
+        borderRadius: 6,
+        padding: '8px 10px',
+        maxHeight: 220,
+        overflowY: 'auto',
+      }}
+    >
+      {log.map((entry, i) => {
+        const isLast = i === log.length - 1
+        const failed = entry.detail.startsWith('FAILED')
+        return (
+          <div key={i} className="row" style={{ gap: 8, alignItems: 'baseline', flexWrap: 'nowrap' }}>
+            <span className="muted" style={{ whiteSpace: 'nowrap' }}>{fmtTime(entry.at)}</span>
+            <span
+              className="badge"
+              style={{
+                flexShrink: 0,
+                borderColor: failed ? 'var(--color-danger)' : undefined,
+                color: failed ? 'var(--color-danger)' : undefined,
+              }}
+            >
+              {entry.stage}
+            </span>
+            <span style={{ color: failed ? 'var(--color-danger)' : undefined }}>
+              {entry.detail}
+              {isLast && active && (
+                <span className="spinner" style={{ width: 9, height: 9, marginLeft: 6, display: 'inline-block' }} />
+              )}
+            </span>
+          </div>
         )
       })}
     </div>
@@ -113,8 +203,14 @@ function EvidenceDetailView({ detail }: { detail: EvidenceDetail }) {
     () => new Map(entities.map((e) => [e.local_id, e.name])),
     [entities],
   )
+  const active = ACTIVE.has(detail.status)
   return (
     <div className="stack" style={{ gap: 'var(--space-3)' }}>
+      <div>
+        <h4 style={{ margin: '0 0 4px' }}>Live pipeline activity</h4>
+        <LiveLog log={detail.processing_log ?? []} active={active} />
+      </div>
+
       {detail.extraction?.summary && (
         <p style={{ margin: 0 }}>
           <strong>Summary:</strong> {detail.extraction.summary}
@@ -173,19 +269,6 @@ function EvidenceDetailView({ detail }: { detail: EvidenceDetail }) {
           </table>
         </div>
       )}
-
-      {(detail.processing_log?.length ?? 0) > 0 && (
-        <details>
-          <summary className="muted">Processing log</summary>
-          <ul style={{ margin: '4px 0 0', paddingLeft: 18 }}>
-            {detail.processing_log!.map((entry, i) => (
-              <li key={i} className="muted">
-                <code>{entry.stage}</code> — {entry.detail}
-              </li>
-            ))}
-          </ul>
-        </details>
-      )}
     </div>
   )
 }
@@ -196,6 +279,7 @@ export default function IngestPage() {
   const [sourceName, setSourceName] = useState('')
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [flash, setFlash] = useState<string | null>(null)
+  const [rowError, setRowError] = useState<{ id: string; message: string } | null>(null)
 
   const evidenceQuery = useQuery({
     queryKey: ['evidence-list'],
@@ -222,6 +306,11 @@ export default function IngestPage() {
     refetchInterval: 5000,
   })
 
+  const refreshList = () => {
+    queryClient.invalidateQueries({ queryKey: ['evidence-list'] })
+    if (selectedId) queryClient.invalidateQueries({ queryKey: ['evidence', selectedId] })
+  }
+
   const afterIngest = (evidenceId: string, note?: string) => {
     setFlash(note === 'duplicate' ? 'Already ingested (duplicate content).' : null)
     setSelectedId(evidenceId)
@@ -241,7 +330,28 @@ export default function IngestPage() {
   })
   const retry = useMutation({
     mutationFn: (id: string) => api.retryEvidence(id),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['evidence-list'] }),
+    onSuccess: refreshList,
+    onError: (err, id) => setRowError({ id, message: (err as Error).message }),
+  })
+  const cancel = useMutation({
+    mutationFn: (id: string) => api.cancelEvidence(id),
+    onSuccess: refreshList,
+    onError: (err, id) => setRowError({ id, message: (err as Error).message }),
+  })
+  const deleteEv = useMutation({
+    mutationFn: ({ id, force }: { id: string; force?: boolean }) =>
+      api.deleteEvidence(id, force),
+    onSuccess: (res) => {
+      if (selectedId === res.evidence_id) setSelectedId(null)
+      setFlash(
+        `Deleted: ${res.facts_deleted} facts, ${res.review_items_deleted} review items, ` +
+          `${res.registry_entities_deleted} orphaned entities removed` +
+          (res.graph_cleaned ? ' (graph cleaned).' : ' (graph cleanup skipped).'),
+      )
+      queryClient.invalidateQueries({ queryKey: ['evidence-list'] })
+      queryClient.invalidateQueries({ queryKey: ['fact-review'] })
+    },
+    onError: (err, vars) => setRowError({ id: vars.id, message: (err as Error).message }),
   })
   const approve = useMutation({
     mutationFn: (id: number) => api.approveFactReview(id),
@@ -251,6 +361,16 @@ export default function IngestPage() {
     mutationFn: (id: number) => api.rejectFactReview(id),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['fact-review'] }),
   })
+
+  const onDelete = (ev: EvidenceSummary) => {
+    const running = ACTIVE.has(ev.status)
+    const msg = running
+      ? `"${ev.source_name}" is still processing. Force-stop and delete it, along with all its extracted facts?`
+      : `Delete "${ev.source_name}" and all its extracted facts? This cannot be undone.`
+    if (window.confirm(msg)) {
+      deleteEv.mutate({ id: ev.id, force: running })
+    }
+  }
 
   const rows = evidenceQuery.data ?? []
   const review = reviewQuery.data ?? []
@@ -266,7 +386,9 @@ export default function IngestPage() {
         <p className="muted" style={{ margin: 0 }}>
           Anything you ingest is parsed, run through LLM extraction, resolved against the
           existing entity registry (so re-ingesting the same people/companies enriches
-          them instead of duplicating), written to the graph, and auto-enriched.
+          them instead of duplicating), written to the graph, and auto-enriched. Every
+          stage streams its progress below — you can stop a run or delete an item at any
+          time.
         </p>
 
         <div className="row" style={{ alignItems: 'stretch', gap: 'var(--space-4)', flexWrap: 'wrap' }}>
@@ -334,32 +456,65 @@ export default function IngestPage() {
         <div className="card stack">
           <h3 style={{ margin: 0 }}>Evidence ({rows.length})</h3>
           {rows.length === 0 && <p className="muted" style={{ margin: 0 }}>Nothing ingested yet.</p>}
-          {rows.map((ev) => (
-            <div key={ev.id} className="stack" style={{ gap: 6, borderBottom: '1px solid var(--color-border)', paddingBottom: 8 }}>
-              <div className="row" style={{ justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
-                <button
-                  className="link-button"
-                  style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', font: 'inherit', textAlign: 'left' }}
-                  onClick={() => setSelectedId(selectedId === ev.id ? null : ev.id)}
-                >
-                  <strong>{ev.source_name}</strong>{' '}
-                  <span className="badge">{ev.source_type}</span>
-                </button>
-                <span className="row" style={{ gap: 8 }}>
-                  <StatusChip status={ev.status} />
-                  {ev.status === 'failed' && (
-                    <button onClick={() => retry.mutate(ev.id)} disabled={retry.isPending}>
-                      Retry
-                    </button>
-                  )}
-                </span>
+          {rows.map((ev) => {
+            const active = ACTIVE.has(ev.status)
+            const stopping = active && ev.cancel_requested
+            return (
+              <div key={ev.id} className="stack" style={{ gap: 6, borderBottom: '1px solid var(--color-border)', paddingBottom: 8 }}>
+                <div className="row" style={{ justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
+                  <button
+                    className="link-button"
+                    style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', font: 'inherit', textAlign: 'left' }}
+                    onClick={() => setSelectedId(selectedId === ev.id ? null : ev.id)}
+                  >
+                    <strong>{ev.source_name}</strong>{' '}
+                    <span className="badge">{ev.source_type}</span>
+                  </button>
+                  <span className="row" style={{ gap: 8 }}>
+                    <StatusChip status={ev.status} cancelRequested={ev.cancel_requested} />
+                    {active && (
+                      <button
+                        onClick={() => cancel.mutate(ev.id)}
+                        disabled={cancel.isPending || stopping}
+                        title="Stop the pipeline at the next stage boundary"
+                      >
+                        {stopping ? 'Stopping…' : 'Stop'}
+                      </button>
+                    )}
+                    {(ev.status === 'failed' || ev.status === 'cancelled') && (
+                      <button onClick={() => retry.mutate(ev.id)} disabled={retry.isPending}>
+                        Retry
+                      </button>
+                    )}
+                    {(TERMINAL.has(ev.status) || active) && (
+                      <button
+                        onClick={() => onDelete(ev)}
+                        disabled={deleteEv.isPending}
+                        style={{ color: 'var(--color-danger)', borderColor: 'var(--color-danger)' }}
+                        title="Delete this evidence and everything extracted from it"
+                      >
+                        Delete
+                      </button>
+                    )}
+                  </span>
+                </div>
+                <PipelineProgress status={ev.status} error={ev.error} />
+                {ev.last_log && selectedId !== ev.id && (
+                  <p className="muted" style={{ margin: 0, fontSize: '0.85em', fontFamily: 'var(--font-mono, monospace)' }}>
+                    {fmtTime(ev.last_log.at)} · {ev.last_log.stage} — {ev.last_log.detail}
+                  </p>
+                )}
+                {rowError?.id === ev.id && (
+                  <p style={{ color: 'var(--color-danger)', margin: 0, fontSize: '0.9em' }}>
+                    {rowError.message}
+                  </p>
+                )}
+                {selectedId === ev.id && detailQuery.data && (
+                  <EvidenceDetailView detail={detailQuery.data} />
+                )}
               </div>
-              <PipelineProgress status={ev.status} />
-              {selectedId === ev.id && detailQuery.data && (
-                <EvidenceDetailView detail={detailQuery.data} />
-              )}
-            </div>
-          ))}
+            )
+          })}
         </div>
       </div>
     </main>

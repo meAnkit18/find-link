@@ -1,6 +1,8 @@
 import type {
+  CancelEvidenceResponse,
   CaseCreated,
   CaseSummary,
+  DeleteEvidenceResponse,
   Direction,
   EntityGraph,
   EntitySearchHit,
@@ -226,6 +228,13 @@ export const api = {
   getEvidence: (evidenceId: string) => request<EvidenceDetail>(`/api/evidence/${evidenceId}`),
   retryEvidence: (evidenceId: string) =>
     request<IngestResponse>(`/api/evidence/${evidenceId}/retry`, { method: 'POST' }),
+  cancelEvidence: (evidenceId: string) =>
+    request<CancelEvidenceResponse>(`/api/evidence/${evidenceId}/cancel`, { method: 'POST' }),
+  deleteEvidence: (evidenceId: string, force = false) =>
+    request<DeleteEvidenceResponse>(
+      `/api/evidence/${evidenceId}${force ? '?force=true' : ''}`,
+      { method: 'DELETE' },
+    ),
   factReviewQueue: () => request<FactReviewItem[]>('/api/evidence/review/queue'),
   approveFactReview: (itemId: number) =>
     request<{ ok: boolean }>(`/api/evidence/review/${itemId}/approve`, { method: 'POST' }),
