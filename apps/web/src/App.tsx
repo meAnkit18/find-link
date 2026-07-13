@@ -8,9 +8,11 @@ import EntitiesRiskPage from './pages/EntitiesRiskPage'
 import ReviewQueuePage from './pages/ReviewQueuePage'
 import AgentToolsPage from './pages/AgentToolsPage'
 import ApiConsolePage from './pages/ApiConsolePage'
+import IngestPage from './pages/IngestPage'
 
 const NAV = [
   { to: '/', label: 'Graphs', end: true },
+  { to: '/ingest', label: 'Ingest' },
   { to: '/investigation', label: 'Investigation' },
   { to: '/cases', label: 'Cases' },
   { to: '/entities', label: 'Entities & Risk' },
@@ -43,6 +45,7 @@ function App() {
       </header>
       <Routes>
         <Route path="/" element={<GraphsListPage />} />
+        <Route path="/ingest" element={<IngestPage />} />
         <Route path="/graphs/:graphId/upload" element={<UploadPage />} />
         <Route path="/graphs/:graphId" element={<ExplorerPage />} />
         <Route path="/investigation" element={<InvestigationGraphPage />} />

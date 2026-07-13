@@ -4,10 +4,14 @@ import type {
   Direction,
   EntityGraph,
   EntitySearchHit,
+  EvidenceDetail,
+  EvidenceSummary,
+  FactReviewItem,
   GraphDetail,
   GraphNode,
   GraphSummary,
   ImportJob,
+  IngestResponse,
   NodeDetail,
   NoteAdded,
   PathResult,
@@ -203,6 +207,30 @@ export const api = {
     request<ToolResult>(`/api/agent/calculate-risk${qs({ entity_id: entityId })}`, {
       method: 'POST',
     }),
+
+  // -- Evidence ingestion (unstructured data) -----------------------------
+  ingestText: (text: string, sourceName: string) =>
+    request<IngestResponse>('/api/evidence/ingest/text', {
+      method: 'POST',
+      body: JSON.stringify({ text, source_name: sourceName }),
+    }),
+  ingestFile: (file: File) => {
+    const form = new FormData()
+    form.append('file', file)
+    return request<IngestResponse>('/api/evidence/ingest/file', {
+      method: 'POST',
+      body: form,
+    })
+  },
+  listEvidence: (limit = 50) => request<EvidenceSummary[]>(`/api/evidence?limit=${limit}`),
+  getEvidence: (evidenceId: string) => request<EvidenceDetail>(`/api/evidence/${evidenceId}`),
+  retryEvidence: (evidenceId: string) =>
+    request<IngestResponse>(`/api/evidence/${evidenceId}/retry`, { method: 'POST' }),
+  factReviewQueue: () => request<FactReviewItem[]>('/api/evidence/review/queue'),
+  approveFactReview: (itemId: number) =>
+    request<{ ok: boolean }>(`/api/evidence/review/${itemId}/approve`, { method: 'POST' }),
+  rejectFactReview: (itemId: number) =>
+    request<{ ok: boolean }>(`/api/evidence/review/${itemId}/reject`, { method: 'POST' }),
 
   // -- Server-side ingestion pipeline -------------------------------------------------
   ingestServerCsv: (filePath: string, sourceName: string) =>

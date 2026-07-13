@@ -5,25 +5,20 @@ import time
 from typing import Any
 
 from graph_core.client import GraphClient
+from intelligence_schema.ingest_schema import ENTITY_TAG, KEY_COLUMN
 
 
 class GraphWriter:
     """Projects accepted facts into NebulaGraph.
 
-    Idempotent re-projections: INSERT VERTEX overwrites props for an existing VID.
+    Idempotent re-projections: INSERT VERTEX overwrites props for an existing VID,
+    so re-running a write for the same evidence converges to the same state.
     """
-
-    _EXTRA_COLUMN = {
-        "country": ("iso2", "iso2"),
-        "passport": ("number", "number"),
-        "phone": ("number", "number"),
-        "email": ("address", "address"),
-        "bank_account": ("iban", "iban"),
-        "vehicle": ("plate", "plate"),
-    }
 
     def __init__(self, client: GraphClient) -> None:
         self._client = client
+
+    # ------------------------------------------------------------- entities
 
     def upsert_entity(
         self, tag: str, vid: str, name: str,
@@ -31,35 +26,51 @@ class GraphWriter:
         confidence: float = 0.0,
         evidence_id: str | None = None,
     ) -> None:
+        entity_type = tag
+        tag = ENTITY_TAG.get(tag, tag.lower())
+
         now = int(time.time())
-        attrs = attributes or {}
+        attrs = dict(attributes or {})
         aliases = attrs.pop("aliases", [])
         extra_props = attrs.pop("extra_props", {})
         props_bag = {**extra_props, **attrs}
 
-        cols = ["label", "entity_type", "props", "confidence", "created_at", "updated_at"]
+        cols = ["label", "entity_type", "props", "confidence",
+                "evidence_ids", "created_at", "updated_at"]
         vals = [
             self._ngql_value(name),
-            self._ngql_value(tag),
+            self._ngql_value(entity_type),
             self._ngql_value(
-                json.dumps({"aliases": aliases, **props_bag}, ensure_ascii=False, default=str),
+                json.dumps({"aliases": aliases, **props_bag}, ensure_ascii=False, default=str)
             ),
             self._ngql_value(float(confidence)),
+            self._ngql_value(json.dumps([evidence_id] if evidence_id else [])),
             self._ngql_value(now),
             self._ngql_value(now),
         ]
 
-        if tag in self._EXTRA_COLUMN:
-            col, attr_key = self._EXTRA_COLUMN[tag]
-            cols.insert(1, col)
-            vals.insert(1, self._ngql_value(attrs.get(attr_key, "")))
+        if tag in KEY_COLUMN:
+            key_col = KEY_COLUMN[tag]
+            cols.insert(1, key_col)
+            vals.insert(1, self._ngql_value(str(attrs.get(key_col, "") or props_bag.get(key_col, ""))))
 
-        if evidence_id:
-            cols.append("evidence_ids")
-            vals.append(self._ngql_value(json.dumps([evidence_id])))
-
-        ngql = f'INSERT VERTEX {tag}({", ".join(cols)}) VALUES "{vid}":({", ".join(vals)});'
+        ngql = (
+            f'INSERT VERTEX {tag}({", ".join(cols)}) '
+            f'VALUES {self._ngql_value(str(vid))}:({", ".join(vals)});'
+        )
         self._client.execute_raw(ngql)
+
+    def upsert_evidence(self, evidence_id: str, source_name: str, source_type: str) -> None:
+        now = int(time.time())
+        ngql = (
+            f'INSERT VERTEX evidence(label, entity_type, source_name, source_type, created_at) '
+            f'VALUES {self._ngql_value(str(evidence_id))}:('
+            f'{self._ngql_value(source_name)}, {self._ngql_value("evidence")}, '
+            f'{self._ngql_value(source_name)}, {self._ngql_value(source_type)}, {now});'
+        )
+        self._client.execute_raw(ngql)
+
+    # -------------------------------------------------------- relationships
 
     def upsert_relationship(
         self, edge_type: str, src_id: str, dst_id: str,
@@ -74,27 +85,31 @@ class GraphWriter:
             "status": status,
             "evidence_ids": evidence_id or "",
             "props": json.dumps(attributes or {}, ensure_ascii=False, default=str),
+            "relationship_type": relation_label or "",
             "created_at": now,
         }
-        if edge_type == "RELATED_TO":
-            props["relationship_type"] = relation_label or ""
-
         cols = ", ".join(props.keys())
         vals = ", ".join(self._ngql_value(v) for v in props.values())
-        ngql = f'INSERT EDGE {edge_type}({cols}) VALUES "{src_id}"->"{dst_id}":({vals});'
+        ngql = (
+            f'INSERT EDGE {edge_type}({cols}) VALUES '
+            f'{self._ngql_value(str(src_id))}->{self._ngql_value(str(dst_id))}:({vals});'
+        )
         self._client.execute_raw(ngql)
 
     def link_supported_by(self, entity_id: str, evidence_id: str, confidence: float) -> None:
         now = int(time.time())
         ngql = (
-            f'INSERT EDGE SUPPORTED_BY(extraction_confidence, created_at) '
-            f'VALUES "{entity_id}"->"{evidence_id}":({float(confidence)}, {now});'
+            f'INSERT EDGE SUPPORTED_BY(extraction_confidence, created_at) VALUES '
+            f'{self._ngql_value(str(entity_id))}->{self._ngql_value(str(evidence_id))}'
+            f':({float(confidence)}, {now});'
         )
         self._client.execute_raw(ngql)
 
+    # ------------------------------------------------------------ traversal
+
     def fetch_neighborhood(self, entity_id: str, depth: int = 2, limit: int = 60) -> list[dict]:
         ngql = (
-            f'GO 1 TO {depth} STEPS FROM "{entity_id}" OVER * '
+            f'GO 1 TO {depth} STEPS FROM {self._ngql_value(str(entity_id))} OVER * '
             f"YIELD src(edge) AS src, dst(edge) AS dst, type(edge) AS rel, "
             f"properties(edge).status AS status LIMIT {limit};"
         )
@@ -110,6 +125,8 @@ class GraphWriter:
                 })
         return rows
 
+    # -------------------------------------------------------------- values
+
     def _ngql_value(self, v: Any) -> str:
         if v is None:
             return "NULL"
@@ -117,7 +134,7 @@ class GraphWriter:
             return "true" if v else "false"
         if isinstance(v, (int, float)):
             return repr(v)
-        if isinstance(v, str):
-            escaped = v.replace("\\", "\\\\").replace('"', '\\"').replace("\n", " ")
-            return f'"{escaped}"'
-        return f'"{str(v)}"'
+        if not isinstance(v, str):
+            v = str(v)
+        escaped = v.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
+        return f'"{escaped}"'

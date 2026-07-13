@@ -90,6 +90,8 @@ def from_value_wrapper(value: ValueWrapper) -> Any:
         if isinstance(t, TimeWrapper):
             return time(t.get_hour(), t.get_minute(), t.get_sec(), t.get_microsec())
         return time(t.hour, t.minute, t.sec, t.microsec)
+    if hasattr(value, "is_empty") and value.is_empty():
+        return None
     raise TypeError(f"Unsupported NebulaGraph value type: {value!r}")
 
 

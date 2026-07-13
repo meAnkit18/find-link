@@ -79,6 +79,21 @@ class GraphRegistry:
         tmp_path.write_text(json.dumps(payload, indent=2))
         os.replace(tmp_path, self._path)
 
+    def ensure(self, graph_id: str, name: str) -> Graph:
+        """Get-or-create a Graph with a fixed id (== Nebula space name).
+        Used to pin the always-on Intelligence Graph into the explorer UI."""
+        with self._lock:
+            graph = self._graphs.get(graph_id)
+            if graph is None:
+                graph = Graph(
+                    id=graph_id,
+                    name=name,
+                    created_at=datetime.now(timezone.utc).isoformat(),
+                )
+                self._graphs[graph_id] = graph
+                self._save()
+            return graph
+
     def create(self, name: str) -> Graph:
         with self._lock:
             graph = Graph(

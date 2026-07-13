@@ -19,6 +19,8 @@ class Settings:
     data_dir: Path
     database_url: str
     evidence_dir: str
+    nebula_space: str
+    ingest_mode: str
 
     def build_config(self, space: str) -> GraphConfig:
         return GraphConfig(
@@ -49,6 +51,8 @@ def load_settings() -> Settings:
         data_dir=data_dir,
         database_url=os.environ.get("EVIDENCE_DATABASE_URL", "sqlite:///./evidence_store.db"),
         evidence_dir=os.environ.get("EVIDENCE_DIR", "./evidence_store"),
+        nebula_space=os.environ.get("NEBULA_SPACE", "intelligence_graph"),
+        ingest_mode=os.environ.get("INGEST_MODE", "inline").lower(),
     )
     settings.data_dir.mkdir(parents=True, exist_ok=True)
     settings.uploads_dir.mkdir(parents=True, exist_ok=True)

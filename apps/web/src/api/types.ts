@@ -182,3 +182,86 @@ export interface ToolResult {
   data: Record<string, unknown> | null
   message: string
 }
+
+// -- Evidence ingestion pipeline --------------------------------------------
+
+export type EvidenceStatus =
+  | 'uploaded'
+  | 'queued'
+  | 'parsed'
+  | 'extracted'
+  | 'resolved'
+  | 'written'
+  | 'enriched'
+  | 'failed'
+
+export interface EvidenceSummary {
+  id: string
+  source_name: string
+  source_type: string
+  status: EvidenceStatus
+  uploaded_at: string
+  error: string | null
+}
+
+export interface EvidenceFact {
+  id: string
+  kind: 'entity' | 'relationship' | 'merge_suggestion'
+  status: string
+  origin: string
+  confidence: number
+  payload: Record<string, unknown>
+}
+
+export interface ProcessingLogEntry {
+  stage: string
+  at: string
+  detail: string
+}
+
+export interface ExtractedEntityOut {
+  local_id: string
+  type: string
+  name: string
+  attributes: Record<string, unknown>
+  confidence: number
+  source_span?: string | null
+}
+
+export interface ExtractedRelationshipOut {
+  source_local_id: string
+  target_local_id: string
+  type: string
+  relation_label?: string | null
+  confidence: number
+  source_span?: string | null
+}
+
+export interface EvidenceDetail extends EvidenceSummary {
+  sha256: string
+  uploaded_by: string
+  processing_log: ProcessingLogEntry[] | null
+  extraction: {
+    entities?: ExtractedEntityOut[]
+    relationships?: ExtractedRelationshipOut[]
+    summary?: string | null
+  } | null
+  facts: EvidenceFact[]
+}
+
+export interface IngestResponse {
+  evidence_id: string
+  status: string
+  source_type?: string
+  note?: string
+}
+
+export interface FactReviewItem {
+  id: number
+  fact_id: string
+  evidence_id: string
+  reason: string
+  detail: Record<string, unknown>
+  created_at: string
+  kind: string | null
+}
