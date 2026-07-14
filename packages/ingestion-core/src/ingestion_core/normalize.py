@@ -89,6 +89,9 @@ def deterministic_key(entity: ExtractedEntity) -> str | None:
 
 
 def normalize_extraction(result: ExtractionResult) -> ExtractionResult:
+    dropped_local_ids: set[str] = set()
+    valid: list[ExtractedEntity] = []
+
     for ent in result.entities:
         t, attrs = ent.type.value, ent.attributes
 
@@ -98,13 +101,19 @@ def normalize_extraction(result: ExtractionResult) -> ExtractionResult:
                 if norm := normalize_date(str(dob)):
                     attrs["dob"] = norm
         elif t == "Phone":
-            if norm := normalize_phone(attrs.get("number") or ent.name):
-                attrs["number"] = norm
-                ent.name = norm
+            norm = normalize_phone(attrs.get("number") or ent.name)
+            if norm is None:
+                dropped_local_ids.add(ent.local_id)
+                continue
+            attrs["number"] = norm
+            ent.name = norm
         elif t == "Email":
-            if norm := normalize_email(attrs.get("address") or ent.name):
-                attrs["address"] = norm
-                ent.name = norm
+            norm = normalize_email(attrs.get("address") or ent.name)
+            if norm is None:
+                dropped_local_ids.add(ent.local_id)
+                continue
+            attrs["address"] = norm
+            ent.name = norm
         elif t == "Passport":
             raw = attrs.get("number") or ent.name
             attrs["number"] = normalize_passport_number(raw)
@@ -123,4 +132,13 @@ def normalize_extraction(result: ExtractionResult) -> ExtractionResult:
             ent.name = re.sub(r"\s+", " ", ent.name).strip()
         elif t == "Address":
             ent.name = re.sub(r"\s+", " ", ent.name).strip().title()
+
+        valid.append(ent)
+
+    result.entities = valid
+    result.relationships = [
+        rel for rel in result.relationships
+        if rel.source_local_id not in dropped_local_ids
+        and rel.target_local_id not in dropped_local_ids
+    ]
     return result

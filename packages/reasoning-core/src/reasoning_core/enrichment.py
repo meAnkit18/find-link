@@ -9,12 +9,20 @@ from sqlalchemy.orm import Session
 from evidence_core.db_models import EntityRegistry, Fact
 
 
+_LLM_TIMEOUT = int(os.environ.get("LLM_TIMEOUT", "120"))  # noqa: E402
+
+
 def _llm_chat_json(system: str, user: str) -> dict:
+    key = os.environ.get("LLM_API_KEY", "")
+    if not key or key == "sk-not-set":
+        return {"proposals": []}
     try:
         from openai import OpenAI
         client = OpenAI(
             base_url=os.environ.get("LLM_BASE_URL", "https://api.deepseek.com/v1"),
-            api_key=os.environ.get("LLM_API_KEY", "sk-not-set"),
+            api_key=key,
+            timeout=_LLM_TIMEOUT,
+            max_retries=0,
         )
         resp = client.chat.completions.create(
             model=os.environ.get("LLM_MODEL", "deepseek-chat"),

@@ -120,7 +120,7 @@ function LiveLog({ log, active }: { log: ProcessingLogEntry[]; active: boolean }
     >
       {log.map((entry, i) => {
         const isLast = i === log.length - 1
-        const failed = entry.detail.startsWith('FAILED')
+        const failed = (entry.detail ?? '').startsWith('FAILED')
         return (
           <div key={i} className="row" style={{ gap: 8, alignItems: 'baseline', flexWrap: 'nowrap' }}>
             <span className="muted" style={{ whiteSpace: 'nowrap' }}>{fmtTime(entry.at)}</span>
@@ -330,18 +330,19 @@ export default function IngestPage() {
   })
   const retry = useMutation({
     mutationFn: (id: string) => api.retryEvidence(id),
-    onSuccess: refreshList,
+    onSuccess: () => { setRowError(null); refreshList() },
     onError: (err, id) => setRowError({ id, message: (err as Error).message }),
   })
   const cancel = useMutation({
     mutationFn: (id: string) => api.cancelEvidence(id),
-    onSuccess: refreshList,
+    onSuccess: () => { setRowError(null); refreshList() },
     onError: (err, id) => setRowError({ id, message: (err as Error).message }),
   })
   const deleteEv = useMutation({
     mutationFn: ({ id, force }: { id: string; force?: boolean }) =>
       api.deleteEvidence(id, force),
     onSuccess: (res) => {
+      setRowError(null)
       if (selectedId === res.evidence_id) setSelectedId(null)
       setFlash(
         `Deleted: ${res.facts_deleted} facts, ${res.review_items_deleted} review items, ` +

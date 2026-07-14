@@ -110,6 +110,8 @@ def _graph_client():
 
 
 def _confidence_gate(fact: Fact, db: Session) -> None:
+    db.add(fact)
+    db.flush()  # ensure fact.id is populated before ReviewItem references it
     settings = get_settings()
     if fact.confidence >= settings.conf_auto_accept:
         fact.status = "accepted"
@@ -130,7 +132,6 @@ def _confidence_gate(fact: Fact, db: Session) -> None:
             detail=fact.payload,
             state="rejected",
         ))
-    db.add(fact)
 
 
 # --------------------------------------------------------------------------- step 1: parse
@@ -279,6 +280,22 @@ def step_resolve(evidence_id: str) -> None:
     db = SessionLocal()
     try:
         ev = _load_checked(db, evidence_id, "resolve")
+
+        # If this evidence has been resolved before (e.g. a retry), wipe
+        # previously derived facts and review items so we don't duplicate them.
+        old = db.query(Fact).filter(
+            Fact.evidence_id == evidence_id
+        ).delete(synchronize_session=False)
+        old_reviews = db.query(ReviewItem).filter(
+            ReviewItem.evidence_id == evidence_id
+        ).delete(synchronize_session=False)
+        if old or old_reviews:
+            _log(
+                ev, "resolve",
+                f"cleared {old} previous fact(s) and "
+                f"{old_reviews} review item(s) before re-resolving",
+            )
+
         result = ExtractionResult(**(ev.extraction_json or {}))
         _log(
             ev, "resolve",
