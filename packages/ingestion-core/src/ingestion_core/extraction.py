@@ -12,7 +12,7 @@ from ingestion_core.canonical import (
     ExtractedRelationship,
     ExtractionResult,
 )
-from ingestion_core.llm import chat_json
+from ingestion_core.llm import LLMOutputError, chat_json
 
 _ENTITY_TYPES = ", ".join(t.value for t in EntityType)
 _REL_TYPES = ", ".join(RELATIONSHIP_TYPES.keys())
@@ -127,38 +127,7 @@ def _merge_results(chunks: list[ExtractionResult]) -> ExtractionResult:
     return merged
 
 
-def extract(evidence_id: str, text: str, structured_hint: str = "") -> ExtractionResult:
-    user = ""
-    if structured_hint:
-        user += f"SOURCE CONTEXT: {structured_hint}\n\n"
-
-    if len(text) > _CHUNK_CHARS:
-        chunks = _chunk_text(text)
-        results: list[ExtractionResult] = []
-        for i, chunk_text in enumerate(chunks):
-            chunk_user = f"{user}PART {i + 1} OF {len(chunks)}:\n{chunk_text}"
-            data = chat_json(SYSTEM_PROMPT, chunk_user, max_tokens=8192)
-            raw_entities = data.get("entities", [])
-            raw_relationships = data.get("relationships", [])
-            raw_confidence = data.get("overall_confidence", 0.5)
-            try:
-                overall_confidence = float(raw_confidence)
-            except (TypeError, ValueError):
-                overall_confidence = 0.5
-            result = ExtractionResult(
-                evidence_id=evidence_id,
-                entities=_parse_entities(raw_entities),
-                relationships=_parse_relationships(raw_relationships),
-                summary=data.get("summary"),
-                overall_confidence=overall_confidence,
-            )
-            results.append(result.validate_relationship_endpoints())
-        return _merge_results(results)
-
-    user += f"TEXT:\n{text}"
-    data = chat_json(SYSTEM_PROMPT, user, max_tokens=8192)
-    raw_entities = data.get("entities", [])
-    raw_relationships = data.get("relationships", [])
+def _build_result(evidence_id: str, data: dict) -> ExtractionResult:
     raw_confidence = data.get("overall_confidence", 0.5)
     try:
         overall_confidence = float(raw_confidence)
@@ -166,9 +135,59 @@ def extract(evidence_id: str, text: str, structured_hint: str = "") -> Extractio
         overall_confidence = 0.5
     result = ExtractionResult(
         evidence_id=evidence_id,
-        entities=_parse_entities(raw_entities),
-        relationships=_parse_relationships(raw_relationships),
+        entities=_parse_entities(data.get("entities", [])),
+        relationships=_parse_relationships(data.get("relationships", [])),
         summary=data.get("summary"),
         overall_confidence=overall_confidence,
     )
     return result.validate_relationship_endpoints()
+
+
+def _split_in_half(text: str) -> tuple[str, str]:
+    """Split on the newline nearest the midpoint (falls back to a hard cut)."""
+    mid = text.rfind("\n", 0, len(text) // 2 + 1)
+    if mid <= 0:
+        mid = text.find("\n", len(text) // 2)
+    if mid <= 0:
+        mid = len(text) // 2
+    return text[:mid], text[mid:]
+
+
+def _extract_part(
+    evidence_id: str, user_prefix: str, part: str, depth: int = 0
+) -> list[ExtractionResult]:
+    """Extract one piece of text; if the model's answer is truncated or
+    malformed, split the piece in half and extract each half.
+
+    Dense structured text (CSV rows) yields far more output tokens per input
+    char than prose, so a chunk that fits EXTRACT_CHUNK_CHARS can still blow
+    past max_tokens. Halving the input roughly halves the output size, so a
+    few levels of recursion always converge."""
+    try:
+        data = chat_json(SYSTEM_PROMPT, f"{user_prefix}{part}", max_tokens=8192)
+        return [_build_result(evidence_id, data)]
+    except LLMOutputError:
+        if depth >= 4 or len(part) < 1500:
+            raise
+        left, right = _split_in_half(part)
+        return (
+            _extract_part(evidence_id, user_prefix, left, depth + 1)
+            + _extract_part(evidence_id, user_prefix, right, depth + 1)
+        )
+
+
+def extract(evidence_id: str, text: str, structured_hint: str = "") -> ExtractionResult:
+    user = ""
+    if structured_hint:
+        user += f"SOURCE CONTEXT: {structured_hint}\n\n"
+
+    chunks = _chunk_text(text) if len(text) > _CHUNK_CHARS else [text]
+
+    results: list[ExtractionResult] = []
+    for i, chunk in enumerate(chunks):
+        if len(chunks) > 1:
+            prefix = f"{user}PART {i + 1} OF {len(chunks)}:\n"
+        else:
+            prefix = f"{user}TEXT:\n"
+        results.extend(_extract_part(evidence_id, prefix, chunk))
+    return _merge_results(results)

@@ -80,13 +80,24 @@ _lock = threading.Lock()
 
 
 def ensure_ingest_schema(client, space: str) -> None:
-    """Idempotently create space + uniform tags/edges. Safe to call often;
-    runs once per (process, space)."""
+    """Idempotently create space + uniform tags/edges. Safe to call often.
+
+    The `_ensured` cache is only a fast path: we still verify the space
+    actually exists, because it can be dropped out from under us (graph
+    deleted via the UI, `DROP SPACE` in a console, or a Nebula data reset)
+    while this process keeps running.
+    """
     with _lock:
         if space in _ensured:
-            return
+            try:
+                if client.metadata.space_exists(space):
+                    return
+            except Exception:
+                pass  # can't verify — fall through and re-ensure from scratch
+            _ensured.discard(space)  # space vanished; rebuild it below
 
         client.metadata.create_space(space, vid_type="FIXED_STRING(64)")
+        _wait_for_space(client, space)
 
         _retry_ddl(client, lambda: client.metadata.create_tag(
             TagSchema(name="person", properties=_tag_props("person"))
@@ -166,6 +177,37 @@ def _retry_ddl(client, fn, attempts: int = 12, delay: float = 2.0) -> None:
             last = exc
             time.sleep(delay)
     raise RuntimeError(f"NebulaGraph DDL kept failing for space setup: {last}")
+
+
+def _wait_for_space(client, space: str, attempts: int = 30, delay: float = 2.0) -> None:
+    """Block until the (asynchronously created) space accepts `USE <space>`.
+
+    NebulaGraph makes a new space usable only after the meta info propagates
+    (~2 heartbeat cycles). `execute_raw` runs `USE <space>` first, so a
+    successful SHOW TAGS proves the space is ready for DDL.
+    """
+    last: Exception | None = None
+    for _ in range(attempts):
+        try:
+            client.execute_raw("SHOW TAGS")
+            return
+        except Exception as exc:
+            last = exc
+            time.sleep(delay)
+    raise RuntimeError(
+        f"space '{space}' was created but never became usable "
+        f"(is storaged registered via ADD HOSTS?): {last}"
+    )
+
+
+def invalidate_ensured(space: str) -> None:
+    """Forget a space so the next ensure_ingest_schema() rebuilds it.
+
+    Call this whenever a space is dropped (graph deletion) so a stale
+    in-process cache can't cause instant SpaceNotFound failures later.
+    """
+    with _lock:
+        _ensured.discard(space)
 
 
 def _verify_uniform(client, space: str) -> None:

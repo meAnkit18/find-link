@@ -3,31 +3,55 @@ from __future__ import annotations
 import json
 import os
 import re
+from functools import lru_cache
 
 from rapidfuzz import fuzz
 
 from entity_resolution.models import MatchCandidate, ResolutionDecision, ResolutionResult
 from entity_resolution.normalize import compute_deterministic_key
 
-_embedder = None
+_embedder = None      # local sentence-transformers model (ER_EMBEDDING_BACKEND=local)
+_hf_client = None     # Hugging Face InferenceClient (ER_EMBEDDING_BACKEND=huggingface)
 _llm_client = None
 
 
+def _embedding_backend() -> str:
+    if os.environ.get("ER_USE_EMBEDDINGS", "true").lower() != "true":
+        return "off"
+    return os.environ.get("ER_EMBEDDING_BACKEND", "huggingface").lower()
+
+
 def _get_embedder():
+    """Local sentence-transformers model — only for ER_EMBEDDING_BACKEND=local."""
     global _embedder
     if _embedder is not None:
         return _embedder
-    if os.environ.get("ER_USE_EMBEDDINGS", "true").lower() == "true":
-        try:
-            from sentence_transformers import SentenceTransformer
-            model = os.environ.get(
-                "ER_EMBEDDING_MODEL",
-                "sentence-transformers/all-MiniLM-L6-v2",
-            )
-            _embedder = SentenceTransformer(model)
-        except ImportError:
-            pass
+    try:
+        from sentence_transformers import SentenceTransformer
+        model = os.environ.get(
+            "ER_EMBEDDING_MODEL",
+            "sentence-transformers/all-MiniLM-L6-v2",
+        )
+        _embedder = SentenceTransformer(model)
+    except ImportError:
+        pass
     return _embedder
+
+
+def _get_hf_client():
+    """Hugging Face Inference API client — nothing runs locally."""
+    global _hf_client
+    if _hf_client is not None:
+        return _hf_client
+    token = os.environ.get("HF_TOKEN", "")
+    if not token:
+        return None
+    try:
+        from huggingface_hub import InferenceClient
+        _hf_client = InferenceClient(provider="hf-inference", api_key=token)
+    except ImportError:
+        pass
+    return _hf_client
 
 
 def _get_llm_client():
@@ -45,13 +69,41 @@ def _get_llm_client():
     return _llm_client
 
 
-def _embedding_similarity(a: str, b: str) -> float:
-    model = _get_embedder()
-    if model is None:
+@lru_cache(maxsize=4096)
+def _hf_similarity(a: str, b: str) -> float:
+    """Cosine similarity computed by the HF serverless Inference API.
+
+    Cached because resolve_cascade() re-compares recurring names during an
+    ingest run; each API call costs latency and free-tier credits.
+    """
+    client = _get_hf_client()
+    if client is None:
         return 0.0
-    import numpy as np
-    va, vb = model.encode([a, b], normalize_embeddings=True)
-    return float(np.dot(va, vb))
+    model = os.environ.get(
+        "ER_EMBEDDING_MODEL",
+        "sentence-transformers/all-MiniLM-L6-v2",
+    )
+    try:
+        scores = client.sentence_similarity(a, other_sentences=[b], model=model)
+        return float(scores[0])
+    except Exception:
+        return 0.0
+
+
+def _embedding_similarity(a: str, b: str) -> float:
+    backend = _embedding_backend()
+    if backend == "huggingface":
+        if not a or not b:
+            return 0.0
+        return _hf_similarity(a, b)
+    if backend == "local":
+        model = _get_embedder()
+        if model is None:
+            return 0.0
+        import numpy as np
+        va, vb = model.encode([a, b], normalize_embeddings=True)
+        return float(np.dot(va, vb))
+    return 0.0
 
 
 def _llm_adjudicate(

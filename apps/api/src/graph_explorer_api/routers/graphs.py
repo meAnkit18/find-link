@@ -82,4 +82,6 @@ def delete_graph(
     graph = get_graph_or_404(graph_id, registry)
     clients.admin().metadata.drop_space(graph.space)
     clients.drop(graph.space)
+    from intelligence_schema.ingest_schema import invalidate_ensured
+    invalidate_ensured(graph.space)
     registry.delete(graph_id)
