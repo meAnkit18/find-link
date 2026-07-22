@@ -111,28 +111,9 @@ services:
         condition: service_healthy
     mem_limit: 64m
 
-  redis:
-    image: redis:7-alpine
-    ports:
-      - "6379:6379"
-    restart: unless-stopped
-
-  postgres:
-    image: postgres:16-alpine
-    environment:
-      POSTGRES_USER: kg
-      POSTGRES_PASSWORD: kgpass
-      POSTGRES_DB: kgpipeline
-    ports:
-      - "5432:5432"
-    volumes:
-      - pgdata:/var/lib/postgresql/data
-    restart: unless-stopped
-
 volumes:
   nebula-meta-data:
   nebula-meta-logs:
   nebula-storage-data:
   nebula-storage-logs:
   nebula-graph-logs:
-  pgdata:

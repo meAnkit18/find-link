@@ -30,15 +30,12 @@ from evidence_core.db_models import Evidence  # noqa: E402, I001
 from graph_explorer_api.config import load_settings  # noqa: E402, I001
 from graph_explorer_api.graph_clients import GraphClientCache  # noqa: E402, I001
 from graph_explorer_api.graph_registry import GraphRegistry  # noqa: E402, I001
-from graph_explorer_api.ingest.jobs import ImportJobRunner  # noqa: E402, I001
 from graph_explorer_api.routers import (  # noqa: E402, I001
     agent_tools,
     entities,
     evidence,
     explorer,
     graphs,
-    imports,
-    ingestion,
     investigations,
     review,
     risk,
@@ -96,7 +93,6 @@ async def lifespan(app: FastAPI):
     app.state.settings = settings
     app.state.registry = GraphRegistry(settings.registry_path)
     app.state.clients = GraphClientCache(settings)
-    app.state.jobs = ImportJobRunner()
     app.state.search_index = SearchIndex()
     app.state.graph_service = None
     app.state.investigation_service = None
@@ -134,11 +130,9 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
     app.include_router(graphs.router)
-    app.include_router(imports.router)
     app.include_router(explorer.router)
     app.include_router(entities.router)
     app.include_router(investigations.router)
-    app.include_router(ingestion.router)
     app.include_router(evidence.router)
     app.include_router(risk.router)
     app.include_router(review.router)

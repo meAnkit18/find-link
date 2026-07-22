@@ -1,6 +1,5 @@
 import { NavLink, Route, Routes } from 'react-router-dom'
 import GraphsListPage from './pages/GraphsListPage'
-import UploadPage from './pages/UploadPage'
 import ExplorerPage from './pages/ExplorerPage'
 import { InvestigationGraphPage } from './pages/InvestigationPage'
 import CasesPage from './pages/CasesPage'
@@ -46,7 +45,6 @@ function App() {
       <Routes>
         <Route path="/" element={<GraphsListPage />} />
         <Route path="/ingest" element={<IngestPage />} />
-        <Route path="/graphs/:graphId/upload" element={<UploadPage />} />
         <Route path="/graphs/:graphId" element={<ExplorerPage />} />
         <Route path="/investigation" element={<InvestigationGraphPage />} />
         <Route path="/cases" element={<CasesPage />} />

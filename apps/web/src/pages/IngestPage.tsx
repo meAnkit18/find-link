@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import { api } from '../api/client'
@@ -10,8 +10,6 @@ const STAGES = ['parsed', 'extracted', 'resolved', 'written', 'enriched'] as con
 const STAGE_VERBS = ['parse', 'extract', 'resolve', 'write', 'enrich'] as const
 const ACTIVE = new Set(['uploaded', 'queued', 'parsed', 'extracted', 'resolved', 'written'])
 const TERMINAL = new Set(['enriched', 'failed', 'cancelled'])
-const ACCEPT =
-  '.pdf,.docx,.txt,.md,.log,.csv,.tsv,.png,.jpg,.jpeg,.tif,.tiff,.bmp,.webp'
 
 function stageIndex(status: string): number {
   return STAGES.indexOf(status as (typeof STAGES)[number])
@@ -147,55 +145,6 @@ function LiveLog({ log, active }: { log: ProcessingLogEntry[]; active: boolean }
   )
 }
 
-function FileDrop({ disabled, onFile }: { disabled?: boolean; onFile: (f: File) => void }) {
-  const inputRef = useRef<HTMLInputElement>(null)
-  const [over, setOver] = useState(false)
-  return (
-    <div
-      className="card"
-      style={{
-        borderStyle: 'dashed',
-        borderColor: over ? 'var(--color-primary)' : 'var(--color-border)',
-        textAlign: 'center',
-        padding: 'var(--space-5)',
-        cursor: disabled ? 'not-allowed' : 'pointer',
-        opacity: disabled ? 0.6 : 1,
-      }}
-      onClick={() => !disabled && inputRef.current?.click()}
-      onDragOver={(e) => {
-        e.preventDefault()
-        if (!disabled) setOver(true)
-      }}
-      onDragLeave={() => setOver(false)}
-      onDrop={(e) => {
-        e.preventDefault()
-        setOver(false)
-        const file = e.dataTransfer.files[0]
-        if (file && !disabled) onFile(file)
-      }}
-    >
-      <input
-        ref={inputRef}
-        type="file"
-        accept={ACCEPT}
-        style={{ display: 'none' }}
-        disabled={disabled}
-        onChange={(e) => {
-          const file = e.target.files?.[0]
-          if (file) onFile(file)
-          e.target.value = ''
-        }}
-      />
-      <p style={{ margin: 0, fontSize: '1.05em' }}>
-        Drop a document here, or click to browse
-      </p>
-      <p className="muted" style={{ margin: 0 }}>
-        PDF, DOCX, TXT/MD, CSV, or scanned images (OCR). Duplicates are detected by hash.
-      </p>
-    </div>
-  )
-}
-
 function EvidenceDetailView({ detail }: { detail: EvidenceDetail }) {
   const entities = detail.extraction?.entities ?? []
   const relationships = detail.extraction?.relationships ?? []
@@ -324,10 +273,6 @@ export default function IngestPage() {
       afterIngest(res.evidence_id, res.note)
     },
   })
-  const ingestFile = useMutation({
-    mutationFn: (file: File) => api.ingestFile(file),
-    onSuccess: (res) => afterIngest(res.evidence_id, res.note),
-  })
   const retry = useMutation({
     mutationFn: (id: string) => api.retryEvidence(id),
     onSuccess: () => { setRowError(null); refreshList() },
@@ -375,7 +320,7 @@ export default function IngestPage() {
 
   const rows = evidenceQuery.data ?? []
   const review = reviewQuery.data ?? []
-  const busy = ingestText.isPending || ingestFile.isPending
+  const busy = ingestText.isPending
 
   return (
     <main className="page">
@@ -392,42 +337,30 @@ export default function IngestPage() {
           time.
         </p>
 
-        <div className="row" style={{ alignItems: 'stretch', gap: 'var(--space-4)', flexWrap: 'wrap' }}>
-          <div className="card stack" style={{ flex: '1 1 340px' }}>
-            <h3 style={{ margin: 0 }}>Paste text</h3>
-            <input
-              placeholder="Source name (e.g. field-report-2026-07-13)"
-              value={sourceName}
-              onChange={(e) => setSourceName(e.target.value)}
-            />
-            <textarea
-              rows={7}
-              placeholder="Paste an intelligence report, article, email, transcript…"
-              value={text}
-              onChange={(e) => setText(e.target.value)}
-            />
-            <button
-              disabled={busy || !text.trim()}
-              onClick={() => ingestText.mutate()}
-            >
-              {ingestText.isPending ? 'Ingesting…' : 'Ingest text'}
-            </button>
-            {ingestText.isError && (
-              <p style={{ color: 'var(--color-danger)', margin: 0 }}>
-                {(ingestText.error as Error).message}
-              </p>
-            )}
-          </div>
-
-          <div className="card stack" style={{ flex: '1 1 340px' }}>
-            <h3 style={{ margin: 0 }}>Upload a document</h3>
-            <FileDrop disabled={busy} onFile={(file) => ingestFile.mutate(file)} />
-            {ingestFile.isError && (
-              <p style={{ color: 'var(--color-danger)', margin: 0 }}>
-                {(ingestFile.error as Error).message}
-              </p>
-            )}
-          </div>
+        <div className="card stack" style={{ maxWidth: 640 }}>
+          <h3 style={{ margin: 0 }}>Paste text</h3>
+          <input
+            placeholder="Source name (e.g. field-report-2026-07-13)"
+            value={sourceName}
+            onChange={(e) => setSourceName(e.target.value)}
+          />
+          <textarea
+            rows={7}
+            placeholder="Paste an intelligence report, article, email, transcript…"
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+          />
+          <button
+            disabled={busy || !text.trim()}
+            onClick={() => ingestText.mutate()}
+          >
+            {ingestText.isPending ? 'Ingesting…' : 'Ingest text'}
+          </button>
+          {ingestText.isError && (
+            <p style={{ color: 'var(--color-danger)', margin: 0 }}>
+              {(ingestText.error as Error).message}
+            </p>
+          )}
         </div>
 
         {flash && <p className="muted" style={{ margin: 0 }}>{flash}</p>}

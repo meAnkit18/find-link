@@ -12,7 +12,6 @@ import type {
   GraphDetail,
   GraphNode,
   GraphSummary,
-  ImportJob,
   IngestResponse,
   NodeDetail,
   NoteAdded,
@@ -79,15 +78,6 @@ export const api = {
     request<GraphSummary>('/api/graphs', { method: 'POST', body: JSON.stringify({ name }) }),
   getGraph: (graphId: string) => request<GraphDetail>(`/api/graphs/${graphId}`),
   deleteGraph: (graphId: string) => request<void>(`/api/graphs/${graphId}`, { method: 'DELETE' }),
-
-  // -- CSV import jobs ------------------------------------------------------
-  startImport: (graphId: string, file: File) => {
-    const form = new FormData()
-    form.append('file', file)
-    return request<ImportJob>(`/api/graphs/${graphId}/imports`, { method: 'POST', body: form })
-  },
-  getImportJob: (graphId: string, jobId: string) =>
-    request<ImportJob>(`/api/graphs/${graphId}/imports/${jobId}`),
 
   // -- Explorer -------------------------------------------------------------
   getSchema: (graphId: string) => request<SchemaInfo>(`/api/graphs/${graphId}/schema`),
@@ -216,14 +206,6 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ text, source_name: sourceName }),
     }),
-  ingestFile: (file: File) => {
-    const form = new FormData()
-    form.append('file', file)
-    return request<IngestResponse>('/api/evidence/ingest/file', {
-      method: 'POST',
-      body: form,
-    })
-  },
   listEvidence: (limit = 50) => request<EvidenceSummary[]>(`/api/evidence?limit=${limit}`),
   getEvidence: (evidenceId: string) => request<EvidenceDetail>(`/api/evidence/${evidenceId}`),
   retryEvidence: (evidenceId: string) =>

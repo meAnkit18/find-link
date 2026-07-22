@@ -14,7 +14,7 @@ export default function GraphsListPage() {
     mutationFn: (graphName: string) => api.createGraph(graphName),
     onSuccess: (graph) => {
       queryClient.invalidateQueries({ queryKey: ['graphs'] })
-      navigate(`/graphs/${graph.id}/upload`)
+      navigate(`/graphs/${graph.id}`)
     },
   })
 
@@ -75,9 +75,6 @@ export default function GraphsListPage() {
                   </div>
                 </div>
                 <div className="row">
-                  <Link className="btn" to={`/graphs/${graph.id}/upload`}>
-                    Import more data
-                  </Link>
                   <button
                     className="btn btn--danger"
                     onClick={() => {

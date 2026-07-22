@@ -3,11 +3,10 @@ from __future__ import annotations
 import hashlib
 import logging
 import os
-import re
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -15,9 +14,7 @@ from evidence_core.database import SessionLocal
 from evidence_core.db_models import EntityRegistry, Evidence, Fact, ReviewItem, utcnow
 from evidence_core.pipeline import run_pipeline_inline
 from graph_explorer_api.config import Settings
-from graph_explorer_api.dependencies import get_settings
 from graph_explorer_api.graph_clients import GraphClientCache
-from ingestion_core.parsers.detect import detect_source_type
 from intelligence_schema.graph_writer import GraphWriter
 
 logger = logging.getLogger(__name__)
@@ -43,12 +40,6 @@ def get_db() -> Session:
         yield db
     finally:
         db.close()
-
-
-def _safe_filename(filename: str | None) -> str:
-    name = Path(filename or "upload").name
-    name = re.sub(r"[^A-Za-z0-9._-]", "_", name)
-    return name[:200] or "upload"
 
 
 # ------------------------------------------------------------------ dispatch
@@ -135,51 +126,7 @@ def ingest_text(body: TextIn, request: Request, db: Session = Depends(get_db)): 
     return {"evidence_id": ev.id, "status": "queued", "source_type": "text"}
 
 
-@router.post("/ingest/file")
-def ingest_file(
-    request: Request,
-    file: UploadFile = File(...),  # noqa: B008
-    uploaded_by: str = Form("anonymous"),  # noqa: B008
-    settings: Settings = Depends(get_settings),  # noqa: B008
-    db: Session = Depends(get_db),  # noqa: B008
-):
-    safe_name = _safe_filename(file.filename)
-    try:
-        source_type = detect_source_type(safe_name)
-    except ValueError as e:
-        raise HTTPException(415, str(e)) from e
 
-    data = file.file.read()
-    if not data:
-        raise HTTPException(422, "uploaded file is empty")
-    sha256 = hashlib.sha256(data).hexdigest()
-
-    existing = db.query(Evidence).filter(
-        Evidence.sha256 == sha256,
-        Evidence.status.notin_(["failed", "cancelled"]),
-    ).first()
-    if existing:
-        return {"evidence_id": existing.id, "status": existing.status, "note": "duplicate"}
-
-    ev = Evidence(
-        source_name=safe_name,
-        source_type=source_type,
-        sha256=sha256,
-        uploaded_by=uploaded_by,
-    )
-    db.add(ev)
-    db.flush()
-
-    dest = (Path(settings.evidence_dir) / f"{ev.id}_{safe_name}").resolve()
-    if not str(dest).startswith(str(Path(settings.evidence_dir).resolve())):
-        raise HTTPException(400, "invalid filename")
-    with open(dest, "wb") as fh:
-        fh.write(data)
-    ev.stored_path = str(dest)
-    db.commit()
-
-    _dispatch_pipeline(ev.id, request)
-    return {"evidence_id": ev.id, "status": "queued", "source_type": source_type}
 
 
 # ------------------------------------------------------------------ listing

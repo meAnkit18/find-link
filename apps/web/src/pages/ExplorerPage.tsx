@@ -158,9 +158,6 @@ export default function ExplorerPage() {
         <div className="explorer-topbar__search">
           {graphId && <SearchBar graphId={graphId} onResultClick={handleSearchResult} />}
         </div>
-        <Link className="btn" to={`/graphs/${graphId}/upload`}>
-          Import more data
-        </Link>
       </div>
 
       <div className="explorer-layout">

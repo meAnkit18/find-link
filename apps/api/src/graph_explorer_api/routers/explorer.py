@@ -21,8 +21,8 @@ from graph_explorer_api.search.index import SearchIndex
 
 router = APIRouter(prefix="/api/graphs/{graph_id}", tags=["explorer"])
 
-OVERVIEW_DEFAULT_LIMIT = 40
-NEIGHBORS_DEFAULT_LIMIT = 100
+OVERVIEW_DEFAULT_LIMIT = 25
+NEIGHBORS_DEFAULT_LIMIT = 50
 
 
 class SchemaOut(BaseModel):

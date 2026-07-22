@@ -87,6 +87,10 @@ export default function GraphCanvas({ nodes, edges, selectedVid, onSelect, onExp
       container: containerRef.current,
       style: STYLE,
       wheelSensitivity: 0.2,
+      pixelRatio: 1,
+      textureOnViewport: true,
+      hideEdgesOnViewport: true,
+      motionBlur: false,
     })
     cyRef.current = cy
 
@@ -134,7 +138,8 @@ export default function GraphCanvas({ nodes, edges, selectedVid, onSelect, onExp
       // @types/cytoscape's built-in layout typings, hence the cast.
       const fcoseOptions = {
         name: 'fcose',
-        animate: true,
+        animate: false,
+        quality: 'draft',
         randomize: !hadNodesBefore,
         fit: false,
         nodeRepulsion: 8000,
