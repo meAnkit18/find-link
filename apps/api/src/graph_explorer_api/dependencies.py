@@ -30,12 +30,12 @@ def get_clients(request: Request) -> GraphClientCache:
     return request.app.state.clients
 
 
-def get_jobs(request: Request) -> ImportJobRunner:
-    return request.app.state.jobs
-
-
 def get_search_index(request: Request) -> SearchIndex:
     return request.app.state.search_index
+
+
+def get_jobs(request: Request) -> ImportJobRunner:
+    return request.app.state.jobs
 
 
 def get_graph_service(request: Request) -> GraphService:

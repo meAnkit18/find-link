@@ -156,6 +156,14 @@ def ensure_ingest_schema(client, space: str) -> None:
             PropertyDefinition("created_at", "datetime", nullable=True),
         ]))
 
+        _ensure_tag_indexes(client, [
+            *ENTITY_TAG.values(),
+            "evidence",
+            "review_item",
+            "investigation_case",
+            "case_note",
+        ])
+
         _verify_uniform(client, space)
         _ensured.add(space)
 
@@ -198,6 +206,16 @@ def _wait_for_space(client, space: str, attempts: int = 30, delay: float = 2.0) 
         f"space '{space}' was created but never became usable "
         f"(is storaged registered via ADD HOSTS?): {last}"
     )
+
+
+def _ensure_tag_indexes(client, tags: list[str]) -> None:
+    for tag in tags:
+        index_name = f"idx_{tag}"
+        _retry_ddl(client, lambda t=tag, i=index_name: client.metadata.create_tag_index(i, t, []))
+        try:
+            client.metadata.rebuild_tag_index(index_name)
+        except Exception:
+            pass
 
 
 def invalidate_ensured(space: str) -> None:

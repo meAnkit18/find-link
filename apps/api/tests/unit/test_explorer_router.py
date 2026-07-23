@@ -1,20 +1,22 @@
+from types import SimpleNamespace
+
 import pytest
 
 
 @pytest.fixture
-def graph_with_data(client):
+def graph_with_data(client, fake_clients):
+    """Seed the fake graph store directly (the CSV import route was removed
+    in text-only mode, so tests no longer go through it)."""
     graph = client.post("/api/graphs", json={"name": "G"}).json()
-    csv_bytes = (
-        b"source,target,relationship\n"
-        b"Alice,Bob,friend\n"
-        b"Bob,Cara,coworker\n"
-        b"Alice,Cara,friend\n"
+    fake = fake_clients.for_space(graph["id"])
+    fake.metadata.create_tag(SimpleNamespace(name="entity"))
+    fake.metadata.create_edge_type(SimpleNamespace(name="FRIEND"))
+    fake.metadata.create_edge_type(SimpleNamespace(name="COWORKER"))
+    fake.vertices.create_many(
+        "entity", [(n, {"label": n}) for n in ("Alice", "Bob", "Cara")]
     )
-    resp = client.post(
-        f"/api/graphs/{graph['id']}/imports",
-        files={"file": ("friends.csv", csv_bytes, "text/csv")},
-    )
-    assert resp.json()["status"] == "done"
+    fake.edges.create_many("FRIEND", [("Alice", "Bob", 0, {}), ("Alice", "Cara", 0, {})])
+    fake.edges.create_many("COWORKER", [("Bob", "Cara", 0, {})])
     return graph
 
 

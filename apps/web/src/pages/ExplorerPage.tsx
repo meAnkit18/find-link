@@ -179,6 +179,20 @@ export default function ExplorerPage() {
               <span className="spinner" /> Loading graph…
             </div>
           )}
+          {overviewQuery.isError && (
+            <div
+              className="stack"
+              style={{ height: '100%', alignItems: 'center', justifyContent: 'center' }}
+            >
+              <p className="error-text">
+                Could not load the graph overview:{' '}
+                {overviewQuery.error instanceof Error ? overviewQuery.error.message : 'unknown error'}
+              </p>
+              <button className="btn btn-sm" onClick={() => overviewQuery.refetch()}>
+                Retry
+              </button>
+            </div>
+          )}
           {overviewQuery.data && visibleNodes.length === 0 && (
             <div className="row" style={{ height: '100%', justifyContent: 'center' }}>
               <p className="muted">This graph is empty — import a CSV to get started.</p>

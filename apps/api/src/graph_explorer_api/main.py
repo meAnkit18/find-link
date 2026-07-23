@@ -36,10 +36,13 @@ from graph_explorer_api.routers import (  # noqa: E402, I001
     evidence,
     explorer,
     graphs,
+    imports,
+    ingestion,
     investigations,
     review,
     risk,
 )
+from graph_explorer_api.ingest.jobs import ImportJobRunner  # noqa: E402, I001
 from graph_explorer_api.search.index import SearchIndex  # noqa: E402, I001
 from graph_explorer_api.services.graph_service import GraphService  # noqa: E402, I001
 from graph_explorer_api.services.investigation_service import InvestigationService  # noqa: E402, I001
@@ -94,6 +97,7 @@ async def lifespan(app: FastAPI):
     app.state.registry = GraphRegistry(settings.registry_path)
     app.state.clients = GraphClientCache(settings)
     app.state.search_index = SearchIndex()
+    app.state.jobs = ImportJobRunner()
     app.state.graph_service = None
     app.state.investigation_service = None
 
@@ -136,6 +140,8 @@ def create_app() -> FastAPI:
     app.include_router(evidence.router)
     app.include_router(risk.router)
     app.include_router(review.router)
+    app.include_router(imports.router)
+    app.include_router(ingestion.router)
     app.include_router(agent_tools.router)
     return app
 

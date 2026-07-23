@@ -3,12 +3,12 @@ from __future__ import annotations
 import pytest
 from fastapi.testclient import TestClient
 
-from graph_explorer_api.dependencies import get_clients, get_jobs, get_registry, get_search_index, get_settings
+from graph_explorer_api.dependencies import get_clients, get_registry, get_search_index, get_settings
 from graph_explorer_api.graph_registry import GraphRegistry
 from graph_explorer_api.main import create_app
 from graph_explorer_api.search.index import SearchIndex
 
-from tests.unit.fakes import FakeGraphClientCache, SyncImportJobRunner
+from tests.unit.fakes import FakeGraphClientCache
 
 
 @pytest.fixture
@@ -24,17 +24,20 @@ def settings(tmp_path, monkeypatch):
 
 
 @pytest.fixture
-def client(settings):
+def fake_clients():
+    return FakeGraphClientCache()
+
+
+@pytest.fixture
+def client(settings, fake_clients):
     app = create_app()
     registry = GraphRegistry(settings.registry_path)
-    clients = FakeGraphClientCache()
-    jobs = SyncImportJobRunner()
+    clients = fake_clients
     search_index = SearchIndex()
 
     app.dependency_overrides[get_settings] = lambda: settings
     app.dependency_overrides[get_registry] = lambda: registry
     app.dependency_overrides[get_clients] = lambda: clients
-    app.dependency_overrides[get_jobs] = lambda: jobs
     app.dependency_overrides[get_search_index] = lambda: search_index
 
     with TestClient(app) as test_client:

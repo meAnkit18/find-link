@@ -63,6 +63,9 @@ class Metadata:
             f"CREATE EDGE INDEX IF NOT EXISTS {index_name} ON {edge_type}({columns})"
         )
 
+    def rebuild_tag_index(self, index_name: str) -> None:
+        self._executor.execute(f"REBUILD TAG INDEX {index_name}")
+
     # -- inspection --
 
     def list_tags(self) -> list[str]:

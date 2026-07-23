@@ -151,7 +151,11 @@ def build_fetch_vertices(vids: list[str]) -> str:
 
 
 def build_scan_vertices(tag: str, limit: int | None = None) -> str:
-    """Scan all vertices of a tag. LOOKUP without a WHERE clause needs no index."""
+    """Scan all vertices of a tag via LOOKUP.
+
+    NOTE: LOOKUP ON <tag> REQUIRES a tag index on <tag> (an empty index
+    `ON tag()` is sufficient). Schema-setup code must create one per tag.
+    """
     validate_identifier(tag, "tag")
     ngql = f"LOOKUP ON {tag} YIELD id(vertex) AS id"
     if limit is not None:

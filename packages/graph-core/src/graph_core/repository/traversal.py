@@ -79,7 +79,7 @@ class Traversal:
         return len(result.rows)
 
     def scan_vertices(self, tag: str, limit: int | None = None) -> list[RawVertex]:
-        """Fetch every vertex of a tag. No index required (full tag scan)."""
+        """Fetch vertices of a tag. Requires a tag index on `tag` (LOOKUP-based)."""
         ngql = build_scan_vertices(tag, limit)
         result = self._executor.execute(ngql)
         return [row["v"] for row in result.rows if isinstance(row.get("v"), RawVertex)]
