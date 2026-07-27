@@ -21,7 +21,12 @@ interface GraphData {
 export default function ExplorerPage() {
   const { graphId } = useParams<{ graphId: string }>()
   const rootVidsRef = useRef<Set<string>>(new Set())
+  // Edge keys each expansion added, so collapse removes only those (and not
+  // the original overview edges that happened to touch the same node).
+  const expansionEdgeKeysRef = useRef<Map<string, Set<string>>>(new Map())
   const [graphData, setGraphData] = useState<GraphData>({ nodes: new Map(), edges: new Map() })
+  const [expandingVids, setExpandingVids] = useState<Set<string>>(new Set())
+  const [actionError, setActionError] = useState<string | null>(null)
 
   const {
     selectedVid,
@@ -47,7 +52,10 @@ export default function ExplorerPage() {
   useEffect(() => {
     reset()
     rootVidsRef.current = new Set()
+    expansionEdgeKeysRef.current = new Map()
     setGraphData({ nodes: new Map(), edges: new Map() })
+    setExpandingVids(new Set())
+    setActionError(null)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [graphId])
 
@@ -61,42 +69,74 @@ export default function ExplorerPage() {
   }, [overviewQuery.data])
 
   async function expandNode(vid: string) {
-    const edgeTypes = schemaQuery.data?.edge_types ?? []
-    const nextNodes: GraphNode[] = []
-    const nextEdges: GraphEdge[] = []
+    const edgeTypes = schemaQuery.data?.edge_types
+    if (!edgeTypes || edgeTypes.length === 0) {
+      // Without the schema we would fetch nothing; refusing (instead of
+      // silently marking the node expanded) keeps the UI honest.
+      setActionError('The graph schema is still loading — try expanding again in a moment.')
+      return
+    }
+    if (expandingVids.has(vid)) return // an expansion for this node is already in flight
+    setExpandingVids((prev) => new Set(prev).add(vid))
+    setActionError(null)
 
-    await Promise.all(
-      edgeTypes.map(async (edgeType) => {
-        const [outNeighbors, inNeighbors] = await Promise.all([
-          api.getNeighbors(graphId!, vid, { edgeType, direction: 'out', limit: 100 }),
-          api.getNeighbors(graphId!, vid, { edgeType, direction: 'in', limit: 100 }),
-        ])
-        for (const n of outNeighbors) {
-          nextNodes.push(n)
-          nextEdges.push({ src: vid, dst: n.vid, edge_type: edgeType, rank: 0, properties: {} })
-        }
-        for (const n of inNeighbors) {
-          nextNodes.push(n)
-          nextEdges.push({ src: n.vid, dst: vid, edge_type: edgeType, rank: 0, properties: {} })
-        }
-      }),
-    )
+    try {
+      const nextNodes: GraphNode[] = []
+      const nextEdges: GraphEdge[] = []
 
-    setGraphData((prev) => {
-      const nodes = new Map(prev.nodes)
-      nextNodes.forEach((n) => nodes.set(n.vid, n))
-      const edges = new Map(prev.edges)
-      nextEdges.forEach((e) => edges.set(edgeKey(e), e))
-      return { nodes, edges }
-    })
-    markExpanded(vid)
+      await Promise.all(
+        edgeTypes.map(async (edgeType) => {
+          const [outNeighbors, inNeighbors] = await Promise.all([
+            api.getNeighbors(graphId!, vid, { edgeType, direction: 'out', limit: 100 }),
+            api.getNeighbors(graphId!, vid, { edgeType, direction: 'in', limit: 100 }),
+          ])
+          for (const n of outNeighbors) {
+            nextNodes.push(n)
+            nextEdges.push({ src: vid, dst: n.vid, edge_type: edgeType, rank: 0, properties: {} })
+          }
+          for (const n of inNeighbors) {
+            nextNodes.push(n)
+            nextEdges.push({ src: n.vid, dst: vid, edge_type: edgeType, rank: 0, properties: {} })
+          }
+        }),
+      )
+
+      setGraphData((prev) => {
+        const nodes = new Map(prev.nodes)
+        nextNodes.forEach((n) => {
+          if (!nodes.has(n.vid)) nodes.set(n.vid, n)
+        })
+        const edges = new Map(prev.edges)
+        const addedKeys = expansionEdgeKeysRef.current.get(vid) ?? new Set<string>()
+        nextEdges.forEach((e) => {
+          const key = edgeKey(e)
+          if (!edges.has(key)) addedKeys.add(key)
+          edges.set(key, e)
+        })
+        expansionEdgeKeysRef.current.set(vid, addedKeys)
+        return { nodes, edges }
+      })
+      markExpanded(vid)
+    } catch (err) {
+      setActionError(
+        err instanceof Error ? `Could not expand this node: ${err.message}` : 'Could not expand this node.',
+      )
+    } finally {
+      setExpandingVids((prev) => {
+        const next = new Set(prev)
+        next.delete(vid)
+        return next
+      })
+    }
   }
 
   function collapseNode(vid: string) {
+    const addedKeys = expansionEdgeKeysRef.current.get(vid)
+    expansionEdgeKeysRef.current.delete(vid)
     setGraphData((prev) => {
       const edges = new Map(prev.edges)
-      for (const [key, edge] of prev.edges) {
-        if (edge.src === vid || edge.dst === vid) edges.delete(key)
+      if (addedKeys) {
+        for (const key of addedKeys) edges.delete(key)
       }
       const stillReferenced = new Set<string>()
       for (const edge of edges.values()) {
@@ -116,14 +156,21 @@ export default function ExplorerPage() {
   }
 
   async function handleSearchResult(result: SearchResult) {
-    if (!graphData.nodes.has(result.vid)) {
-      const node = await api.getNode(graphId!, result.vid)
-      setGraphData((prev) => ({
-        nodes: new Map(prev.nodes).set(node.vid, node),
-        edges: prev.edges,
-      }))
+    try {
+      if (!graphData.nodes.has(result.vid)) {
+        const node = await api.getNode(graphId!, result.vid)
+        setGraphData((prev) => ({
+          nodes: new Map(prev.nodes).set(node.vid, node),
+          edges: prev.edges,
+        }))
+      }
+      select(result.vid)
+      setActionError(null)
+    } catch {
+      setActionError(
+        `Could not load "${result.label}" — the search index may be stale. Re-import the data or restart the API to rebuild it.`,
+      )
     }
-    select(result.vid)
   }
 
   const visibleNodes = useMemo(
@@ -138,6 +185,9 @@ export default function ExplorerPage() {
       ),
     [graphData.edges, hiddenEdgeTypes, visibleVids],
   )
+
+  const graphIsEmpty = overviewQuery.data != null && graphData.nodes.size === 0
+  const allFilteredOut = graphData.nodes.size > 0 && visibleNodes.length === 0
 
   if (graphQuery.isError) {
     return (
@@ -160,6 +210,8 @@ export default function ExplorerPage() {
         </div>
       </div>
 
+      {actionError && <div className="status-strip">{actionError}</div>}
+
       <div className="explorer-layout">
         {schemaQuery.data && (
           <div className="explorer-filter-panel">
@@ -174,12 +226,11 @@ export default function ExplorerPage() {
         )}
 
         <div className="card explorer-canvas">
-          {overviewQuery.isLoading && (
+          {overviewQuery.isLoading ? (
             <div className="row" style={{ height: '100%', justifyContent: 'center' }}>
               <span className="spinner" /> Loading graph…
             </div>
-          )}
-          {overviewQuery.isError && (
+          ) : overviewQuery.isError ? (
             <div
               className="stack"
               style={{ height: '100%', alignItems: 'center', justifyContent: 'center' }}
@@ -192,20 +243,29 @@ export default function ExplorerPage() {
                 Retry
               </button>
             </div>
-          )}
-          {overviewQuery.data && visibleNodes.length === 0 && (
-            <div className="row" style={{ height: '100%', justifyContent: 'center' }}>
-              <p className="muted">This graph is empty — import a CSV to get started.</p>
-            </div>
-          )}
-          {graphId && (
-            <GraphCanvas
-              nodes={visibleNodes}
-              edges={visibleEdges}
-              selectedVid={selectedVid}
-              onSelect={select}
-              onExpand={expandNode}
-            />
+          ) : (
+            <>
+              {graphId && (
+                <GraphCanvas
+                  key={graphId}
+                  nodes={visibleNodes}
+                  edges={visibleEdges}
+                  selectedVid={selectedVid}
+                  onSelect={select}
+                  onExpand={expandNode}
+                />
+              )}
+              {graphIsEmpty && (
+                <div className="explorer-canvas__overlay">
+                  <p className="muted">This graph is empty — import a CSV to get started.</p>
+                </div>
+              )}
+              {allFilteredOut && (
+                <div className="explorer-canvas__overlay">
+                  <p className="muted">All nodes are hidden by the current filters.</p>
+                </div>
+              )}
+            </>
           )}
         </div>
 
@@ -215,6 +275,7 @@ export default function ExplorerPage() {
               graphId={graphId}
               vid={selectedVid}
               isExpanded={expandedVids.has(selectedVid)}
+              isExpanding={expandingVids.has(selectedVid)}
               onExpand={() => expandNode(selectedVid)}
               onCollapse={() => collapseNode(selectedVid)}
               onClose={() => select(null)}

@@ -65,6 +65,16 @@ const STYLE: StylesheetStyle[] = [
   },
 ]
 
+/** If the graph has drifted entirely outside the viewport (the "black
+ * screen"), bring it back into view; otherwise leave the camera alone. */
+function ensureGraphVisible(cy: Core) {
+  if (cy.nodes().length === 0) return
+  const bb = cy.nodes().boundingBox()
+  const ext = cy.extent()
+  const overlaps = bb.x1 < ext.x2 && bb.x2 > ext.x1 && bb.y1 < ext.y2 && bb.y2 > ext.y1
+  if (!overlaps) cy.fit(undefined, 40)
+}
+
 interface Props {
   nodes: GraphNode[]
   edges: GraphEdge[]
@@ -76,6 +86,10 @@ interface Props {
 export default function GraphCanvas({ nodes, edges, selectedVid, onSelect, onExpand }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
   const cyRef = useRef<Core | null>(null)
+  // Last known position of every node that has ever been shown, so filter
+  // toggles restore nodes where they were instead of dropping them at (0,0)
+  // off-screen and re-running the layout.
+  const positionsRef = useRef<Map<string, cytoscape.Position>>(new Map())
   const onSelectRef = useRef(onSelect)
   const onExpandRef = useRef(onExpand)
   onSelectRef.current = onSelect
@@ -88,7 +102,8 @@ export default function GraphCanvas({ nodes, edges, selectedVid, onSelect, onExp
       style: STYLE,
       wheelSensitivity: 0.2,
       pixelRatio: 1,
-      textureOnViewport: true,
+      // NOTE: textureOnViewport was removed on purpose — it causes blank /
+      // black frames during pan+zoom on some GPUs and isn't needed here.
       hideEdgesOnViewport: true,
       motionBlur: false,
     })
@@ -99,8 +114,20 @@ export default function GraphCanvas({ nodes, edges, selectedVid, onSelect, onExp
       if (evt.target === cy) onSelectRef.current(null)
     })
     cy.on('dbltap', 'node', (evt) => onExpandRef.current(evt.target.id()))
+    // Keep the position cache fresh when the user drags nodes around.
+    cy.on('dragfree', 'node', (evt) => {
+      positionsRef.current.set(evt.target.id(), { ...evt.target.position() })
+    })
+
+    // Cytoscape caches its container's size and offset. The container
+    // changes size whenever the detail panel opens/closes, the filter panel
+    // mounts, or the window resizes — without this, rendering goes stale
+    // (blank areas) and clicks hit the wrong coordinates.
+    const resizeObserver = new ResizeObserver(() => cy.resize())
+    resizeObserver.observe(containerRef.current)
 
     return () => {
+      resizeObserver.disconnect()
       cy.destroy()
       cyRef.current = null
     }
@@ -118,12 +145,24 @@ export default function GraphCanvas({ nodes, edges, selectedVid, onSelect, onExp
       if (!desiredEdgeIds.has(ele.id())) ele.remove()
     })
     cy.nodes().forEach((ele) => {
-      if (!desiredNodeIds.has(ele.id())) ele.remove()
+      if (!desiredNodeIds.has(ele.id())) {
+        // Remember where the node was so re-showing it restores the spot.
+        positionsRef.current.set(ele.id(), { ...ele.position() })
+        ele.remove()
+      }
     })
 
-    const newNodeEles: ElementDefinition[] = nodes
-      .filter((n) => cy.getElementById(n.vid).empty())
-      .map((n) => ({ data: { id: n.vid, label: n.label, tag: n.tags[0] ?? 'entity' } }))
+    let brandNewCount = 0
+    const newNodeEles: ElementDefinition[] = []
+    for (const n of nodes) {
+      if (!cy.getElementById(n.vid).empty()) continue
+      const saved = positionsRef.current.get(n.vid)
+      if (!saved) brandNewCount++
+      newNodeEles.push({
+        data: { id: n.vid, label: n.label, tag: n.tags[0] ?? 'entity' },
+        ...(saved ? { position: { ...saved } } : {}),
+      })
+    }
 
     const newEdgeEles: ElementDefinition[] = edges
       .filter((e) => cy.getElementById(edgeId(e)).empty())
@@ -131,9 +170,13 @@ export default function GraphCanvas({ nodes, edges, selectedVid, onSelect, onExp
         data: { id: edgeId(e), source: e.src, target: e.dst, edgeType: e.edge_type },
       }))
 
-    const added = cy.add([...newNodeEles, ...newEdgeEles])
+    cy.add([...newNodeEles, ...newEdgeEles])
 
-    if (added.length > 0) {
+    // Only run the layout when nodes appear that have never had a position
+    // (initial load, an expansion, a search hit). Re-showing filtered nodes
+    // and toggling edge types keep the existing layout untouched, so the
+    // graph no longer reshuffles on every filter click.
+    if (brandNewCount > 0) {
       // fcose's options (animate/randomize/nodeRepulsion/...) aren't part of
       // @types/cytoscape's built-in layout typings, hence the cast.
       const fcoseOptions = {
@@ -146,10 +189,16 @@ export default function GraphCanvas({ nodes, edges, selectedVid, onSelect, onExp
         idealEdgeLength: 90,
       } as unknown as cytoscape.LayoutOptions
       const layout = cy.layout(fcoseOptions)
-      if (!hadNodesBefore) {
-        layout.one('layoutstop', () => cy.fit(undefined, 40))
-      }
+      layout.one('layoutstop', () => {
+        // Cache the settled positions of everything, then make sure the
+        // result is actually on screen.
+        cy.nodes().forEach((ele) => positionsRef.current.set(ele.id(), { ...ele.position() }))
+        if (!hadNodesBefore) cy.fit(undefined, 40)
+        else ensureGraphVisible(cy)
+      })
       layout.run()
+    } else if (newNodeEles.length > 0 || newEdgeEles.length > 0) {
+      ensureGraphVisible(cy)
     }
   }, [nodes, edges])
 

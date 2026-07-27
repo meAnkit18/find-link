@@ -5,12 +5,21 @@ interface Props {
   graphId: string
   vid: string
   isExpanded: boolean
+  isExpanding: boolean
   onExpand: () => void
   onCollapse: () => void
   onClose: () => void
 }
 
-export default function NodeDetailPanel({ graphId, vid, isExpanded, onExpand, onCollapse, onClose }: Props) {
+export default function NodeDetailPanel({
+  graphId,
+  vid,
+  isExpanded,
+  isExpanding,
+  onExpand,
+  onCollapse,
+  onClose,
+}: Props) {
   const nodeQuery = useQuery({
     queryKey: ['node', graphId, vid],
     queryFn: () => api.getNode(graphId, vid),
@@ -38,11 +47,11 @@ export default function NodeDetailPanel({ graphId, vid, isExpanded, onExpand, on
           </div>
 
           <div className="row">
-            <button className="btn btn--primary" onClick={onExpand}>
-              Expand neighbors
+            <button className="btn btn--primary" onClick={onExpand} disabled={isExpanding}>
+              {isExpanding ? 'Expanding…' : 'Expand neighbors'}
             </button>
             {isExpanded && (
-              <button className="btn" onClick={onCollapse}>
+              <button className="btn" onClick={onCollapse} disabled={isExpanding}>
                 Collapse
               </button>
             )}

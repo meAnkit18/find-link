@@ -60,7 +60,7 @@ def test_build_delete_edge():
 def test_build_go_neighbors_out():
     ngql = build_go_neighbors("v1", "owns", "out")
     assert ngql == (
-        'GO FROM "v1" OVER owns YIELD DISTINCT dst(edge) AS id '
+        'GO FROM "v1" OVER owns YIELD DISTINCT id($$) AS id '
         '| FETCH PROP ON * $-.id YIELD VERTEX AS v'
     )
 
@@ -82,12 +82,12 @@ def test_build_go_neighbors_rejects_bad_direction():
 
 def test_build_count_neighbors():
     ngql = build_count_neighbors("v1", "owns", "out")
-    assert ngql == 'GO FROM "v1" OVER owns YIELD DISTINCT dst(edge) AS id'
+    assert ngql == 'GO FROM "v1" OVER owns YIELD DISTINCT id($$) AS id'
 
 
 def test_build_count_neighbors_any_edge_type_reverse():
     ngql = build_count_neighbors("v1", None, "in")
-    assert ngql == 'GO FROM "v1" OVER * REVERSELY YIELD DISTINCT dst(edge) AS id'
+    assert ngql == 'GO FROM "v1" OVER * REVERSELY YIELD DISTINCT id($$) AS id'
 
 
 def test_build_insert_vertices_multi_row():
@@ -140,13 +140,14 @@ def test_build_fetch_vertices_requires_vids():
 def test_build_scan_vertices():
     ngql = build_scan_vertices("person")
     assert ngql == (
-        'LOOKUP ON person YIELD id(vertex) AS id | FETCH PROP ON * $-.id YIELD VERTEX AS v'
+        'LOOKUP ON person YIELD id(vertex) AS id | ORDER BY $-.id '
+        '| FETCH PROP ON * $-.id YIELD VERTEX AS v'
     )
 
 
 def test_build_scan_vertices_with_limit():
     ngql = build_scan_vertices("person", limit=50)
     assert ngql == (
-        'LOOKUP ON person YIELD id(vertex) AS id | LIMIT 50 '
+        'LOOKUP ON person YIELD id(vertex) AS id | ORDER BY $-.id | LIMIT 50 '
         '| FETCH PROP ON * $-.id YIELD VERTEX AS v'
     )

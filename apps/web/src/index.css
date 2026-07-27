@@ -203,6 +203,20 @@ a {
   min-width: 0;
   padding: 0;
   overflow: hidden;
+  position: relative;
+}
+
+/* Message shown on top of the canvas (all-filtered-out / empty graph)
+   without unmounting it or pushing it out of the container. */
+.explorer-canvas__overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: var(--space-4);
+  pointer-events: none;
 }
 
 .explorer-detail-panel {
@@ -668,4 +682,73 @@ textarea.input {
   border-bottom: 1px solid var(--color-border);
   color: var(--color-text-muted);
   font-size: 13px;
+}
+
+/* Graph exploration controls (zoom / fit / layout / fullscreen toolbar). */
+
+.graph-controls {
+  position: absolute;
+  top: var(--space-3);
+  right: var(--space-3);
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-1);
+  background: var(--color-surface-raised);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+}
+
+.graph-controls__btn {
+  width: 30px;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 15px;
+  line-height: 1;
+  color: var(--color-text);
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.graph-controls__btn:hover:not(:disabled) {
+  background: var(--color-surface);
+  color: var(--color-primary);
+}
+
+.graph-controls__btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.graph-controls__divider {
+  height: 1px;
+  margin: var(--space-1) var(--space-1);
+  background: var(--color-border);
+}
+
+.graph-zoom-indicator {
+  position: absolute;
+  bottom: var(--space-3);
+  left: var(--space-3);
+  z-index: 10;
+  padding: 2px var(--space-2);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-muted);
+  background: var(--color-surface-raised);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  pointer-events: none;
+  user-select: none;
+}
+
+.explorer-canvas:fullscreen {
+  background: var(--color-bg);
+  border-radius: 0;
 }

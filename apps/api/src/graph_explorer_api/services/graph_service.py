@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from graph_core.client import GraphClient
 from graph_core.merge import MergePlan
+from graph_core.storage.serialization import to_ngql_literal
 
 
 class GraphService:
@@ -9,12 +10,15 @@ class GraphService:
         self.client = client
 
     def get_entity(self, entity_id: str):
-        query = f'FETCH PROP ON * "{entity_id}" YIELD VERTEX AS v'
+        query = f"FETCH PROP ON * {to_ngql_literal(str(entity_id))} YIELD VERTEX AS v"
         result = self.client.execute_raw(query)
         return result.rows[0] if result.rows else None
 
     def search_entities(self, entity_type: str, query_str: str) -> list[dict]:
-        rows = self.client.traversal.scan_vertices(entity_type, limit=100)
+        # Scan the whole tag: SearchIndex already does a full scan per tag,
+        # and capping at 100 made this search silently miss entities,
+        # disagreeing with the Explorer page's search results.
+        rows = self.client.traversal.scan_vertices(entity_type, limit=None)
         lowered = query_str.lower()
         return [
             {

@@ -87,9 +87,12 @@ def _build_over_clause(edge_type: str | None, direction: str) -> str:
 
 
 def build_go_neighbors(vid: str, edge_type: str | None, direction: str) -> str:
+    # id($$) is the destination of the *traversal step*, which is the real
+    # neighbor for out, in (REVERSELY), and both (BIDIRECT) alike.
+    # dst(edge) is wrong here: for REVERSELY it is the start vertex itself.
     over_clause = _build_over_clause(edge_type, direction)
     return (
-        f"GO FROM {_format_vid(vid)} {over_clause} YIELD DISTINCT dst(edge) AS id "
+        f"GO FROM {_format_vid(vid)} {over_clause} YIELD DISTINCT id($$) AS id "
         f"| FETCH PROP ON * $-.id YIELD VERTEX AS v"
     )
 
@@ -97,7 +100,7 @@ def build_go_neighbors(vid: str, edge_type: str | None, direction: str) -> str:
 def build_count_neighbors(vid: str, edge_type: str | None, direction: str) -> str:
     """Count distinct neighbor ids without hydrating full vertices."""
     over_clause = _build_over_clause(edge_type, direction)
-    return f"GO FROM {_format_vid(vid)} {over_clause} YIELD DISTINCT dst(edge) AS id"
+    return f"GO FROM {_format_vid(vid)} {over_clause} YIELD DISTINCT id($$) AS id"
 
 
 def build_insert_vertices(tag: str, rows: list[tuple[str, dict[str, Any]]]) -> str:
@@ -153,11 +156,14 @@ def build_fetch_vertices(vids: list[str]) -> str:
 def build_scan_vertices(tag: str, limit: int | None = None) -> str:
     """Scan all vertices of a tag via LOOKUP.
 
+    Ordered by vertex id so limited scans (the /overview sample) return the
+    same vertices on every call instead of a different subgraph per reload.
+
     NOTE: LOOKUP ON <tag> REQUIRES a tag index on <tag> (an empty index
     `ON tag()` is sufficient). Schema-setup code must create one per tag.
     """
     validate_identifier(tag, "tag")
-    ngql = f"LOOKUP ON {tag} YIELD id(vertex) AS id"
+    ngql = f"LOOKUP ON {tag} YIELD id(vertex) AS id | ORDER BY $-.id"
     if limit is not None:
         ngql += f" | LIMIT {int(limit)}"
     return ngql + " | FETCH PROP ON * $-.id YIELD VERTEX AS v"
@@ -180,7 +186,7 @@ def build_go_neighbors_with_edges(
     over_clause = _build_over_clause(edge_type, direction)
     return (
         f"GO FROM {_format_vid(vid)} {over_clause} "
-        f"YIELD DISTINCT dst(edge) AS id, edge AS e"
+        f"YIELD DISTINCT id($$) AS id, edge AS e"
     )
 
 

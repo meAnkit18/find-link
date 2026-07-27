@@ -21,7 +21,7 @@ def test_get_neighbors_returns_raw_vertices():
     neighbors = traversal.get_neighbors("v1", edge_type="owns", direction="out")
     assert neighbors == [raw_a, raw_b]
     assert executor.executed == [
-        'GO FROM "v1" OVER owns YIELD DISTINCT dst(edge) AS id '
+        'GO FROM "v1" OVER owns YIELD DISTINCT id($$) AS id '
         '| FETCH PROP ON * $-.id YIELD VERTEX AS v'
     ]
 
@@ -38,7 +38,7 @@ def test_count_neighbors_counts_result_rows():
     executor = FakeExecutor(response)
     traversal = Traversal(executor)
     assert traversal.count_neighbors("v1", edge_type="owns", direction="out") == 2
-    assert executor.executed == ['GO FROM "v1" OVER owns YIELD DISTINCT dst(edge) AS id']
+    assert executor.executed == ['GO FROM "v1" OVER owns YIELD DISTINCT id($$) AS id']
 
 
 def test_scan_vertices_returns_raw_vertices():
@@ -48,7 +48,8 @@ def test_scan_vertices_returns_raw_vertices():
     traversal = Traversal(executor)
     assert traversal.scan_vertices("person") == [raw_a]
     assert executor.executed == [
-        'LOOKUP ON person YIELD id(vertex) AS id | FETCH PROP ON * $-.id YIELD VERTEX AS v'
+        'LOOKUP ON person YIELD id(vertex) AS id | ORDER BY $-.id '
+        '| FETCH PROP ON * $-.id YIELD VERTEX AS v'
     ]
 
 
@@ -57,6 +58,6 @@ def test_scan_vertices_with_limit():
     traversal = Traversal(executor)
     traversal.scan_vertices("person", limit=10)
     assert executor.executed == [
-        'LOOKUP ON person YIELD id(vertex) AS id | LIMIT 10 '
+        'LOOKUP ON person YIELD id(vertex) AS id | ORDER BY $-.id | LIMIT 10 '
         '| FETCH PROP ON * $-.id YIELD VERTEX AS v'
     ]

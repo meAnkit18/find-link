@@ -374,6 +374,9 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
+hf = [
+    { name = "huggingface-hub" },
+]
 llm = [
     { name = "openai" },
     { name = "tenacity" },
@@ -386,6 +389,7 @@ ml = [
 requires-dist = [
     { name = "email-validator", specifier = ">=2.2" },
     { name = "graph-core", editable = "packages/graph-core" },
+    { name = "huggingface-hub", marker = "extra == 'hf'", specifier = ">=0.31" },
     { name = "openai", marker = "extra == 'llm'", specifier = ">=1.58" },
     { name = "phonenumbers", specifier = ">=8.13" },
     { name = "pycountry", specifier = ">=24.6" },
@@ -394,7 +398,7 @@ requires-dist = [
     { name = "sentence-transformers", marker = "extra == 'ml'", specifier = ">=3.3" },
     { name = "tenacity", marker = "extra == 'llm'", specifier = ">=9.0" },
 ]
-provides-extras = ["ml", "llm"]
+provides-extras = ["ml", "hf", "llm"]
 
 [[package]]
 name = "evidence-core"
@@ -498,13 +502,7 @@ dependencies = [
     { name = "graph-core" },
     { name = "ingestion-core" },
     { name = "intelligence-schema" },
-    { name = "pandas", version = "2.3.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
-    { name = "pandas", version = "3.0.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
-    { name = "pillow" },
     { name = "psycopg2-binary" },
-    { name = "pymupdf" },
-    { name = "pytesseract" },
-    { name = "python-docx" },
     { name = "python-dotenv" },
     { name = "python-multipart" },
     { name = "reasoning-core" },
@@ -526,12 +524,7 @@ requires-dist = [
     { name = "graph-core", editable = "packages/graph-core" },
     { name = "ingestion-core", editable = "packages/ingestion-core" },
     { name = "intelligence-schema", editable = "packages/intelligence-schema" },
-    { name = "pandas", specifier = ">=2.2" },
-    { name = "pillow", specifier = ">=11.0" },
     { name = "psycopg2-binary", specifier = ">=2.9" },
-    { name = "pymupdf", specifier = ">=1.25" },
-    { name = "pytesseract", specifier = ">=0.3" },
-    { name = "python-docx", specifier = ">=1.1" },
     { name = "python-dotenv", specifier = ">=1.0" },
     { name = "python-multipart", specifier = ">=0.0.9" },
     { name = "reasoning-core", editable = "packages/reasoning-core" },
@@ -821,16 +814,10 @@ dependencies = [
     { name = "evidence-core" },
     { name = "graph-core" },
     { name = "openai" },
-    { name = "pandas", version = "2.3.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
-    { name = "pandas", version = "3.0.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
     { name = "phonenumbers" },
-    { name = "pillow" },
     { name = "pycountry" },
     { name = "pydantic" },
-    { name = "pymupdf" },
-    { name = "pytesseract" },
     { name = "python-dateutil" },
-    { name = "python-docx" },
     { name = "rapidfuzz" },
     { name = "tenacity" },
 ]
@@ -839,6 +826,14 @@ dependencies = [
 extraction = [
     { name = "openai" },
     { name = "tenacity" },
+]
+files = [
+    { name = "pandas", version = "2.3.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "pandas", version = "3.0.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "pillow" },
+    { name = "pymupdf" },
+    { name = "pytesseract" },
+    { name = "python-docx" },
 ]
 
 [package.metadata]
@@ -849,20 +844,20 @@ requires-dist = [
     { name = "graph-core", editable = "packages/graph-core" },
     { name = "openai", specifier = ">=1.58" },
     { name = "openai", marker = "extra == 'extraction'", specifier = ">=1.58" },
-    { name = "pandas", specifier = ">=2.2" },
+    { name = "pandas", marker = "extra == 'files'", specifier = ">=2.2" },
     { name = "phonenumbers", specifier = ">=8.13" },
-    { name = "pillow", specifier = ">=11.0" },
+    { name = "pillow", marker = "extra == 'files'", specifier = ">=11.0" },
     { name = "pycountry", specifier = ">=24.6" },
     { name = "pydantic", specifier = ">=2.10" },
-    { name = "pymupdf", specifier = ">=1.25" },
-    { name = "pytesseract", specifier = ">=0.3" },
+    { name = "pymupdf", marker = "extra == 'files'", specifier = ">=1.25" },
+    { name = "pytesseract", marker = "extra == 'files'", specifier = ">=0.3" },
     { name = "python-dateutil", specifier = ">=2.9" },
-    { name = "python-docx", specifier = ">=1.1" },
+    { name = "python-docx", marker = "extra == 'files'", specifier = ">=1.1" },
     { name = "rapidfuzz", specifier = ">=3.10" },
     { name = "tenacity", specifier = ">=9.0" },
     { name = "tenacity", marker = "extra == 'extraction'", specifier = ">=9.0" },
 ]
-provides-extras = ["extraction"]
+provides-extras = ["extraction", "files"]
 
 [[package]]
 name = "iniconfig"
