@@ -72,3 +72,39 @@ def test_overview_returns_sampled_subgraph(client, graph_with_data):
     body = resp.json()
     assert {n["label"] for n in body["nodes"]} == {"Alice", "Bob", "Cara"}
     assert len(body["edges"]) == 3
+
+
+def test_neighbors_with_edges_returns_real_edge_properties(client, fake_clients, graph_with_data):
+    fake = fake_clients.for_space(graph_with_data["id"])
+    fake.vertices.create_many("entity", [("Dana", {"label": "Dana"})])
+    fake.edges.create_many(
+        "FRIEND", [("Alice", "Dana", 0, {"relationship_type": "childhood_friend"})]
+    )
+
+    resp = client.get(
+        f"/api/graphs/{graph_with_data['id']}/nodes/Alice/neighbors-with-edges",
+        params={"direction": "both"},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+
+    labels = {n["label"] for n in body["nodes"]}
+    assert labels == {"Bob", "Cara", "Dana"}
+
+    dana_edge = next(e for e in body["edges"] if "Dana" in (e["src"], e["dst"]))
+    assert dana_edge["properties"]["relationship_type"] == "childhood_friend"
+    assert dana_edge["edge_type"] == "FRIEND"
+
+
+def test_neighbors_with_edges_respects_limit(client, fake_clients, graph_with_data):
+    resp = client.get(
+        f"/api/graphs/{graph_with_data['id']}/nodes/Alice/neighbors-with-edges",
+        params={"direction": "both", "limit": 1},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert len(body["nodes"]) == 1
+    # every returned edge must touch only Alice + the one included neighbor
+    included = {body["nodes"][0]["vid"], "Alice"}
+    for e in body["edges"]:
+        assert e["src"] in included and e["dst"] in included

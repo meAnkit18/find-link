@@ -141,6 +141,34 @@ def get_neighbors(
     return [_to_node_out(n) for n in neighbors[:limit]]
 
 
+@router.get("/nodes/{vid}/neighbors-with-edges", response_model=SubgraphOut)
+def get_neighbors_with_edges(
+    graph_id: str,
+    vid: str,
+    edge_type: str | None = Query(None),
+    direction: str = Query("out", pattern="^(out|in|both)$"),
+    limit: int = Query(NEIGHBORS_DEFAULT_LIMIT, ge=1, le=1000),
+    registry: GraphRegistry = Depends(get_registry),
+    clients: GraphClientCache = Depends(get_clients),
+) -> SubgraphOut:
+    """Like /neighbors, but includes the real connecting edges (type, rank,
+    properties) instead of the caller synthesizing empty-properties ones —
+    needed so the canvas can show a real relationship label on the line."""
+    graph = get_graph_or_404(graph_id, registry)
+    client = clients.for_space(graph.space)
+    vertices, raw_edges = client.traversal.get_neighbors_with_edges(
+        vid, edge_type=edge_type, direction=direction
+    )
+    limited = vertices[:limit]
+    allowed = {v.vid for v in limited} | {vid}
+    edges = [
+        EdgeOut(src=e.src, dst=e.dst, edge_type=e.edge_type, rank=e.rank, properties=e.properties)
+        for e in raw_edges
+        if e.src in allowed and e.dst in allowed
+    ]
+    return SubgraphOut(nodes=[_to_node_out(v) for v in limited], edges=edges)
+
+
 @router.get("/overview", response_model=SubgraphOut)
 def get_overview(
     graph_id: str,
