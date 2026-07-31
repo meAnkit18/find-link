@@ -5,11 +5,13 @@ interface ExplorerState {
   expandedVids: Set<string>
   hiddenTags: Set<string>
   hiddenEdgeTypes: Set<string>
+  mainTags: Set<string>
   select: (vid: string | null) => void
   markExpanded: (vid: string) => void
   markCollapsed: (vid: string) => void
   toggleTag: (tag: string) => void
   toggleEdgeType: (edgeType: string) => void
+  toggleMainTag: (tag: string) => void
   reset: () => void
 }
 
@@ -18,6 +20,7 @@ export const useExplorerStore = create<ExplorerState>((set) => ({
   expandedVids: new Set(),
   hiddenTags: new Set(),
   hiddenEdgeTypes: new Set(),
+  mainTags: new Set(),
 
   select: (vid) => set({ selectedVid: vid }),
 
@@ -47,11 +50,20 @@ export const useExplorerStore = create<ExplorerState>((set) => ({
       return { hiddenEdgeTypes: next }
     }),
 
+  toggleMainTag: (tag) =>
+    set((state) => {
+      const next = new Set(state.mainTags)
+      if (next.has(tag)) next.delete(tag)
+      else next.add(tag)
+      return { mainTags: next }
+    }),
+
   reset: () =>
     set({
       selectedVid: null,
       expandedVids: new Set(),
       hiddenTags: new Set(),
       hiddenEdgeTypes: new Set(),
+      mainTags: new Set(),
     }),
 }))
