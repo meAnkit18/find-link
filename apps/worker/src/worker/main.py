@@ -26,7 +26,7 @@ class JobWorker:
         ngql = (
             'LOOKUP ON background_job '
             'WHERE background_job.status == "pending" '
-            'AND (background_job.lease_owner IS NULL '
+            'AND (background_job.lease_owner == "" '
             'OR background_job.lease_expires_at < datetime("' + now + '")) '
             'YIELD id(vertex) AS id, properties(vertex) AS props '
             '| LIMIT 1'
@@ -119,7 +119,7 @@ class JobWorker:
 
 def main() -> None:
     config = GraphConfig(
-        hosts=["127.0.0.1:9669"],
+        hosts=[("127.0.0.1", 9669)],
         user="root",
         password="nebula",
         space="intelligence_graph",
