@@ -201,10 +201,16 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas(
   useImperativeHandle(
     ref,
     () => ({
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- zoomIn/zoomOut aren't part of @types/cytoscape's Core typings
-      zoomIn: () => (cyRef.current as any)?.zoomIn(),
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- zoomIn/zoomOut aren't part of @types/cytoscape's Core typings
-      zoomOut: () => (cyRef.current as any)?.zoomOut(),
+      zoomIn: () => {
+        const cy = cyRef.current
+        if (!cy) return
+        cy.zoom({ level: cy.zoom() * 1.2, renderedPosition: { x: cy.width() / 2, y: cy.height() / 2 } })
+      },
+      zoomOut: () => {
+        const cy = cyRef.current
+        if (!cy) return
+        cy.zoom({ level: cy.zoom() / 1.2, renderedPosition: { x: cy.width() / 2, y: cy.height() / 2 } })
+      },
       fit: () => cyRef.current?.fit(undefined, 40),
       centerSelected: () => cyRef.current?.fit(cyRef.current.$('node:selected'), 40),
       relayout: () => {
