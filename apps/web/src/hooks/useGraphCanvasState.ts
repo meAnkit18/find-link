@@ -10,21 +10,26 @@ interface GraphCanvasState {
   edges: Map<string, GraphEdge>
 }
 
-const EMPTY_STATE: GraphCanvasState = { nodes: new Map(), edges: new Map() }
+function emptyState(): GraphCanvasState {
+  return { nodes: new Map(), edges: new Map() }
+}
 
 /** Shared node/edge bookkeeping for an incrementally-expandable Cytoscape
  * graph: tracks which nodes are "roots" (the initial view — never pruned by
- * collapse) and which edges each expansion added, so collapsing one node
- * only removes *its* edges, not ones another still-expanded node also
- * needs, and never drops a node another expansion still references. */
+ * collapse) and which expansions each edge came from, so collapsing one
+ * node only removes an edge once no remaining expanded node still needs it
+ * (an edge two overlapping expansions both returned survives until both are
+ * collapsed), and never drops a node another expansion still references. */
 export function useGraphCanvasState() {
   const rootVidsRef = useRef<Set<string>>(new Set())
-  const expansionEdgeKeysRef = useRef<Map<string, Set<string>>>(new Map())
-  const [state, setState] = useState<GraphCanvasState>(EMPTY_STATE)
+  // edge key -> set of vids whose expansion returned this edge (an edge can
+  // have more than one owner when overlapping expansions both include it)
+  const edgeOwnersRef = useRef<Map<string, Set<string>>>(new Map())
+  const [state, setState] = useState<GraphCanvasState>(emptyState)
 
   const setOverview = useCallback((nodes: GraphNode[], edges: GraphEdge[]) => {
     rootVidsRef.current = new Set(nodes.map((n) => n.vid))
-    expansionEdgeKeysRef.current = new Map()
+    edgeOwnersRef.current = new Map()
     setState({
       nodes: new Map(nodes.map((n) => [n.vid, n])),
       edges: new Map(edges.map((e) => [edgeKey(e), e])),
@@ -38,24 +43,27 @@ export function useGraphCanvasState() {
         if (!nodes.has(n.vid)) nodes.set(n.vid, n)
       })
       const edges = new Map(prev.edges)
-      const addedKeys = expansionEdgeKeysRef.current.get(vid) ?? new Set<string>()
       newEdges.forEach((e) => {
         const key = edgeKey(e)
-        if (!edges.has(key)) addedKeys.add(key)
         edges.set(key, e)
+        const owners = edgeOwnersRef.current.get(key) ?? new Set<string>()
+        owners.add(vid)
+        edgeOwnersRef.current.set(key, owners)
       })
-      expansionEdgeKeysRef.current.set(vid, addedKeys)
       return { nodes, edges }
     })
   }, [])
 
   const collapse = useCallback((vid: string) => {
-    const addedKeys = expansionEdgeKeysRef.current.get(vid)
-    expansionEdgeKeysRef.current.delete(vid)
     setState((prev) => {
       const edges = new Map(prev.edges)
-      if (addedKeys) {
-        for (const key of addedKeys) edges.delete(key)
+      for (const [key, owners] of edgeOwnersRef.current) {
+        if (!owners.has(vid)) continue
+        owners.delete(vid)
+        if (owners.size === 0) {
+          edges.delete(key)
+          edgeOwnersRef.current.delete(key)
+        }
       }
       const stillReferenced = new Set<string>()
       for (const edge of edges.values()) {
@@ -82,8 +90,8 @@ export function useGraphCanvasState() {
 
   const reset = useCallback(() => {
     rootVidsRef.current = new Set()
-    expansionEdgeKeysRef.current = new Map()
-    setState(EMPTY_STATE)
+    edgeOwnersRef.current = new Map()
+    setState(emptyState())
   }, [])
 
   return { ...state, setOverview, mergeExpansion, collapse, addNode, reset }

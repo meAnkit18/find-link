@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../api/client'
 import type { EntityGraphNode, EntitySearchHit, GraphNode, RiskResult } from '../api/types'
 import GraphPicker from '../components/common/GraphPicker'
@@ -45,6 +45,7 @@ export function InvestigationGraphPage() {
 
   const [selectedVid, setSelectedVid] = useState<string | null>(null)
   const [expandedVids, setExpandedVids] = useState<Set<string>>(new Set())
+  const [expandingVids, setExpandingVids] = useState<Set<string>>(new Set())
   const [zoom, setZoom] = useState(1)
   const [isFullscreen, setIsFullscreen] = useState(false)
   const [risk, setRisk] = useState<RiskResult | null>(null)
@@ -58,6 +59,7 @@ export function InvestigationGraphPage() {
     graphState.reset()
     setSelectedVid(null)
     setExpandedVids(new Set())
+    setExpandingVids(new Set())
     setRisk(null)
     setPathSource(null)
     setPathResult(null)
@@ -79,16 +81,35 @@ export function InvestigationGraphPage() {
 
   async function loadEntity(entityId: string, replace: boolean) {
     if (!graphId) return
+    if (expandingVids.has(entityId)) return
+    setExpandingVids((prev) => new Set(prev).add(entityId))
     setStatus(`Expanding ${entityId} (depth ${depth})…`)
     try {
       const data = await api.expandEntityGraph(graphId, entityId, depth)
       const nodes = data.nodes.map(toGraphNode)
-      if (replace) graphState.setOverview(nodes, data.edges)
-      else graphState.mergeExpansion(entityId, nodes, data.edges)
-      setExpandedVids((prev) => new Set(prev).add(entityId))
+      if (replace) {
+        const rootNode = nodes.find((n) => n.vid === entityId) ?? {
+          vid: entityId,
+          tags: [],
+          label: entityId,
+          properties: {},
+        }
+        graphState.setOverview([rootNode], [])
+        graphState.mergeExpansion(entityId, nodes, data.edges)
+        setExpandedVids(new Set([entityId]))
+      } else {
+        graphState.mergeExpansion(entityId, nodes, data.edges)
+        setExpandedVids((prev) => new Set(prev).add(entityId))
+      }
       setStatus(null)
     } catch (err) {
       setStatus(`✗ ${(err as Error).message}`)
+    } finally {
+      setExpandingVids((prev) => {
+        const next = new Set(prev)
+        next.delete(entityId)
+        return next
+      })
     }
   }
 
@@ -102,6 +123,7 @@ export function InvestigationGraphPage() {
   }
 
   function toggleExpand(vid: string) {
+    if (expandingVids.has(vid)) return
     if (expandedVids.has(vid)) collapseEntity(vid)
     else void loadEntity(vid, false)
   }
@@ -136,6 +158,8 @@ export function InvestigationGraphPage() {
   }
 
   const selectedNode = selectedVid ? graphState.nodes.get(selectedVid) ?? null : null
+  const canvasNodes = useMemo(() => Array.from(graphState.nodes.values()), [graphState.nodes])
+  const canvasEdges = useMemo(() => Array.from(graphState.edges.values()), [graphState.edges])
 
   return (
     <main className="page page--flush explorer">
@@ -209,8 +233,8 @@ export function InvestigationGraphPage() {
           <GraphCanvas
             ref={canvasRef}
             key={graphId}
-            nodes={Array.from(graphState.nodes.values())}
-            edges={Array.from(graphState.edges.values())}
+            nodes={canvasNodes}
+            edges={canvasEdges}
             selectedVid={selectedVid}
             mainTags={MAIN_TAGS}
             onSelect={setSelectedVid}
@@ -246,8 +270,16 @@ export function InvestigationGraphPage() {
               <p className="text-secondary mono">{selectedNode.vid}</p>
 
               <div className="row" style={{ flexWrap: 'wrap' }}>
-                <button className="btn btn--primary" onClick={() => toggleExpand(selectedNode.vid)}>
-                  {expandedVids.has(selectedNode.vid) ? 'Collapse' : 'Expand'}
+                <button
+                  className="btn btn--primary"
+                  onClick={() => toggleExpand(selectedNode.vid)}
+                  disabled={expandingVids.has(selectedNode.vid)}
+                >
+                  {expandingVids.has(selectedNode.vid)
+                    ? 'Expanding…'
+                    : expandedVids.has(selectedNode.vid)
+                      ? 'Collapse'
+                      : 'Expand'}
                 </button>
                 <InfoTooltip text="Load everyone and everything directly connected to this node onto the graph, or collapse it back." />
                 <button className="btn" onClick={() => fetchRisk(selectedNode.vid)}>
@@ -289,11 +321,11 @@ export function InvestigationGraphPage() {
             <div className="panel">
               <h3>Investigation tools</h3>
               <p className="text-secondary">
-                Pick a graph, search a person or company, then click it on the canvas to
-                inspect, expand its connections, score risk, or run a shortest path. Only
-                people, companies, and organizations show up front — click one to reveal
-                everything connected to it, and click an expanded node again to collapse
-                it.
+                Pick a graph, search a person or company, then click a result to load its
+                connections onto the canvas — the "Depth" selector controls how many hops
+                out. People, companies, and organizations render larger; related details
+                like phone numbers or addresses render smaller. Click an expanded node
+                again to collapse it back.
               </p>
             </div>
           )}

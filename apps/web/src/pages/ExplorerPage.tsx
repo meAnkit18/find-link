@@ -29,6 +29,7 @@ export default function ExplorerPage() {
     select,
     markExpanded,
     markCollapsed,
+    clearExpanded,
     toggleTag,
     toggleEdgeType,
     toggleMainTag,
@@ -55,6 +56,7 @@ export default function ExplorerPage() {
   useEffect(() => {
     if (!overviewQuery.data) return
     graphState.setOverview(overviewQuery.data.nodes, overviewQuery.data.edges)
+    clearExpanded()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [overviewQuery.data])
 

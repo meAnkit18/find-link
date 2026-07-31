@@ -282,11 +282,23 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas(
     cy.add([...newNodeEles, ...newEdgeEles])
 
     // Keep already-visible nodes' main/sub role in sync when mainTags
-    // changes (e.g. the user just marked a tag as main) without touching
-    // anything else about them.
+    // changes (e.g. the user just marked a tag as main), and already-visible
+    // edges' labels in sync when a later expansion brings back the real
+    // relationship_type for an edge that was first added without one (e.g.
+    // from /overview) — without touching anything else about them, and
+    // without writing when the value hasn't actually changed (Cytoscape's
+    // data setter forces a style recalculation on every call).
     for (const n of nodes) {
       const ele = cy.getElementById(n.vid)
-      if (!ele.empty()) ele.data('role', roleForNode(n, mainTags))
+      if (ele.empty()) continue
+      const role = roleForNode(n, mainTags)
+      if (ele.data('role') !== role) ele.data('role', role)
+    }
+    for (const e of edges) {
+      const ele = cy.getElementById(edgeId(e))
+      if (ele.empty()) continue
+      const label = edgeLabel(e)
+      if (ele.data('edgeType') !== label) ele.data('edgeType', label)
     }
 
     // Only run the layout when nodes appear that have never had a position

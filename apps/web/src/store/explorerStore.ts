@@ -9,6 +9,7 @@ interface ExplorerState {
   select: (vid: string | null) => void
   markExpanded: (vid: string) => void
   markCollapsed: (vid: string) => void
+  clearExpanded: () => void
   toggleTag: (tag: string) => void
   toggleEdgeType: (edgeType: string) => void
   toggleMainTag: (tag: string) => void
@@ -33,6 +34,8 @@ export const useExplorerStore = create<ExplorerState>((set) => ({
       next.delete(vid)
       return { expandedVids: next }
     }),
+
+  clearExpanded: () => set({ expandedVids: new Set() }),
 
   toggleTag: (tag) =>
     set((state) => {

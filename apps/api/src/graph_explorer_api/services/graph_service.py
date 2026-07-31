@@ -71,7 +71,16 @@ class GraphService:
             frontier = next_frontier
 
         if entity_id not in nodes:
-            nodes[entity_id] = {"id": entity_id, "label": entity_id, "tags": {}}
+            source = self.client.vertices.get_many_raw([entity_id])
+            if source:
+                tags = source[0].tags
+                nodes[entity_id] = {
+                    "id": entity_id,
+                    "label": next(iter(tags.values()), {}).get("label", entity_id),
+                    "tags": {k: v for k, v in tags.items()},
+                }
+            else:
+                nodes[entity_id] = {"id": entity_id, "label": entity_id, "tags": {}}
 
         return {"nodes": list(nodes.values()), "edges": edges}
 
