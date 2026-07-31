@@ -1,3 +1,5 @@
+import InfoTooltip from '../common/InfoTooltip'
+
 interface Props {
   onZoomIn: () => void
   onZoomOut: () => void
@@ -26,6 +28,10 @@ export default function GraphControls({
   return (
     <>
       <div className="graph-controls" role="toolbar" aria-label="Graph controls">
+        <div className="row" style={{ justifyContent: 'center', margin: '2px 0' }}>
+          <InfoTooltip text="Zoom, fit, rearrange, save as an image, or view the graph full-screen. Hover any button to see what it does." />
+        </div>
+        <div className="graph-controls__divider" />
         <button className="graph-controls__btn" title="Zoom in (+)" onClick={onZoomIn}>
           {'\u002B'}
         </button>

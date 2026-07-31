@@ -5,17 +5,18 @@ import { api } from '../api/client'
 import type { EntityGraph, EntityGraphNode, EntitySearchHit, RiskResult } from '../api/types'
 import GraphPicker from '../components/common/GraphPicker'
 import JsonView from '../components/common/JsonView'
+import InfoTooltip from '../components/common/InfoTooltip'
 
 cytoscape.use(fcose)
 
 export function riskColor(level: string): string {
   switch (level) {
     case 'high':
-      return '#DC2626'
+      return '#c23b32'
     case 'medium':
-      return '#F59E0B'
+      return '#b5720a'
     default:
-      return '#10B981'
+      return '#1e8a5f'
   }
 }
 
@@ -51,8 +52,8 @@ export function InvestigationGraphPage() {
           selector: 'node',
           style: {
             label: 'data(label)',
-            'background-color': '#3B82F6',
-            color: '#E5E7EB',
+            'background-color': '#2f6feb',
+            color: '#ffffff',
             'text-wrap': 'wrap',
             'text-max-width': '120px',
             'font-size': 10,
@@ -62,7 +63,7 @@ export function InvestigationGraphPage() {
         },
         {
           selector: 'node:selected',
-          style: { 'border-width': 3, 'border-color': '#F59E0B' },
+          style: { 'border-width': 3, 'border-color': '#b5720a' },
         },
         {
           selector: 'edge',
@@ -70,11 +71,14 @@ export function InvestigationGraphPage() {
             width: 2,
             label: 'data(label)',
             'curve-style': 'bezier',
-            'line-color': '#475569',
-            'target-arrow-color': '#475569',
+            'line-color': '#c7ccd6',
+            'target-arrow-color': '#c7ccd6',
             'target-arrow-shape': 'triangle',
             'font-size': 8,
-            color: '#94A3B8',
+            color: '#667085',
+            'text-background-color': '#ffffff',
+            'text-background-opacity': 0.85,
+            'text-background-padding': '2px',
           },
         },
       ],
@@ -184,7 +188,12 @@ export function InvestigationGraphPage() {
         <div className="row" style={{ flex: '0 0 auto' }}>
           <strong>Investigation</strong>
           <div style={{ width: 220 }}>
-            <GraphPicker value={graphId} onChange={setGraphId} label="" />
+            <GraphPicker
+              value={graphId}
+              onChange={setGraphId}
+              label=""
+              info="Choose which graph to search and explore."
+            />
           </div>
         </div>
         <div className="explorer-topbar__search" style={{ position: 'relative' }}>
@@ -196,6 +205,7 @@ export function InvestigationGraphPage() {
               onChange={(e) => setEntityType(e.target.value)}
               title="Entity type (tag)"
             />
+            <InfoTooltip text="What kind of thing to search for, e.g. person, company, or address." />
             <input
               className="input"
               style={{ flex: 1 }}
@@ -226,6 +236,7 @@ export function InvestigationGraphPage() {
         </div>
         <label className="row" style={{ gap: 'var(--space-2)' }}>
           <span className="muted">Depth</span>
+          <InfoTooltip text="How many steps out from a person or company to load onto the graph at once." />
           <select className="select" style={{ width: 90 }} value={depth} onChange={(e) => setDepth(Number(e.target.value))}>
             <option value={1}>1 hop</option>
             <option value={2}>2 hops</option>
@@ -251,9 +262,11 @@ export function InvestigationGraphPage() {
                 <button className="btn btn--primary" onClick={() => loadEntity(selectedNode.id, false)}>
                   Expand
                 </button>
+                <InfoTooltip text="Load everyone and everything directly connected to this node onto the graph." />
                 <button className="btn" onClick={() => fetchRisk(selectedNode.id)}>
                   Risk
                 </button>
+                <InfoTooltip text="Calculate a risk score for this person or company based on their connections and known flags." />
                 {pathSource && pathSource !== selectedNode.id ? (
                   <button className="btn" onClick={() => runShortestPath(selectedNode.id)}>
                     Path from {pathSource.slice(0, 12)}… → here
@@ -263,6 +276,7 @@ export function InvestigationGraphPage() {
                     Path: set as source
                   </button>
                 )}
+                <InfoTooltip text="Find the shortest chain of connections between two people or companies. Pick a starting point here, then click another node to find the path to it." />
               </div>
 
               {risk && risk.entity_id === selectedNode.id && (

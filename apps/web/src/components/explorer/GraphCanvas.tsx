@@ -6,12 +6,12 @@ import type { GraphEdge, GraphNode } from '../../api/types'
 cytoscape.use(fcose)
 
 const TAG_PALETTE = [
-  '#5b8def',
-  '#e5a95b',
-  '#7fd1ae',
-  '#d17fd1',
-  '#d15b5b',
-  '#5bc8d1',
+  '#2f6feb',
+  '#b5720a',
+  '#1e8a5f',
+  '#a340c9',
+  '#c23b32',
+  '#0f9bab',
 ]
 
 function colorForTag(tag: string): string {
@@ -30,36 +30,36 @@ const STYLE: StylesheetStyle[] = [
     style: {
       'background-color': (ele: cytoscape.NodeSingular) => colorForTag(ele.data('tag')),
       label: 'data(label)',
-      color: '#e6e8ec',
+      color: '#1a1d24',
       'font-size': 10,
       'text-valign': 'bottom',
       'text-margin-y': 6,
       width: 26,
       height: 26,
       'border-width': 2,
-      'border-color': '#0f1115',
+      'border-color': '#ffffff',
       'text-outline-width': 2,
-      'text-outline-color': '#0f1115',
+      'text-outline-color': '#f6f7f9',
     },
   },
   {
     selector: 'node:selected',
-    style: { 'border-color': '#5b8def', 'border-width': 3 },
+    style: { 'border-color': '#2f6feb', 'border-width': 3 },
   },
   {
     selector: 'edge',
     style: {
       width: 1.5,
-      'line-color': '#3a3f4b',
-      'target-arrow-color': '#3a3f4b',
+      'line-color': '#c7ccd6',
+      'target-arrow-color': '#c7ccd6',
       'target-arrow-shape': 'triangle',
       'arrow-scale': 0.8,
       'curve-style': 'bezier',
       label: 'data(edgeType)',
       'font-size': 8,
-      color: '#9aa1ad',
-      'text-background-color': '#0f1115',
-      'text-background-opacity': 0.8,
+      color: '#667085',
+      'text-background-color': '#ffffff',
+      'text-background-opacity': 0.85,
       'text-background-padding': '2px',
     },
   },
@@ -182,7 +182,7 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas(
       exportPng: () => {
         const cy = cyRef.current
         if (!cy) return
-        const blob = cy.png({ output: 'blob', bg: '#0f1115', full: true })
+        const blob = cy.png({ output: 'blob', bg: '#ffffff', full: true })
         const url = URL.createObjectURL(blob)
         const a = document.createElement('a')
         a.href = url

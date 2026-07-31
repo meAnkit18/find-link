@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useMutation } from '@tanstack/react-query'
 import { api } from '../api/client'
 import RunResult from '../components/common/RunResult'
+import InfoTooltip from '../components/common/InfoTooltip'
 
 interface Preset {
   label: string
@@ -51,6 +52,10 @@ export default function ApiConsolePage() {
         </p>
 
         <section className="card stack">
+          <div className="row">
+            <span className="field__label" style={{ margin: 0 }}>Quick presets</span>
+            <InfoTooltip text="Click one to prefill a common request below, then edit or send it as-is." />
+          </div>
           <div className="preset-grid">
             {PRESETS.map((p) => (
               <button
@@ -73,6 +78,7 @@ export default function ApiConsolePage() {
                 <option key={m}>{m}</option>
               ))}
             </select>
+            <InfoTooltip text="The type of request to send. GET reads data; POST/PUT/PATCH change data; DELETE removes it." />
             <input
               className="input mono"
               style={{ flex: 1 }}
@@ -91,7 +97,10 @@ export default function ApiConsolePage() {
 
           {['POST', 'PUT', 'PATCH'].includes(method) && (
             <label className="field">
-              <span className="field__label">JSON body (optional)</span>
+              <span className="field__label">
+                JSON body (optional)
+                <InfoTooltip text="Extra data to send with the request, in JSON format. Only used for POST, PUT, and PATCH." />
+              </span>
               <textarea
                 className="input mono"
                 rows={5}

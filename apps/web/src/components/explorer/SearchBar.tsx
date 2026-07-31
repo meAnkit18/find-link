@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { api } from '../../api/client'
 import type { SearchResult } from '../../api/types'
+import InfoTooltip from '../common/InfoTooltip'
 
 interface Props {
   graphId: string
@@ -27,13 +28,16 @@ export default function SearchBar({ graphId, onResultClick }: Props) {
 
   return (
     <div style={{ position: 'relative' }}>
-      <input
-        className="input"
-        style={{ width: '100%' }}
-        placeholder="Search nodes by name…"
-        value={input}
-        onChange={(e) => setInput(e.target.value)}
-      />
+      <div className="row" style={{ gap: 'var(--space-1)' }}>
+        <input
+          className="input"
+          style={{ width: '100%' }}
+          placeholder="Search nodes by name…"
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+        />
+        <InfoTooltip text="Find a person, company, or other item in this graph by typing part of its name." />
+      </div>
       {results.length > 0 && (
         <div
           className="card"

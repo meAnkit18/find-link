@@ -3,6 +3,7 @@ import { useMutation } from '@tanstack/react-query'
 import { api } from '../api/client'
 import Field from '../components/common/Field'
 import RunResult from '../components/common/RunResult'
+import InfoTooltip from '../components/common/InfoTooltip'
 
 /** Agent toolbox workbench — one form per /api/agent/* tool. */
 export default function AgentToolsPage() {
@@ -40,9 +41,18 @@ export default function AgentToolsPage() {
         </p>
 
         <section className="card stack">
-          <h3>search-person</h3>
+          <h3>
+            search-person
+            <InfoTooltip text="Looks up people by (partial) name." />
+          </h3>
           <div className="form-grid">
-            <Field label="Query" value={personQuery} onChange={setPersonQuery} placeholder="name substring" />
+            <Field
+              label="Query"
+              value={personQuery}
+              onChange={setPersonQuery}
+              placeholder="name substring"
+              info="Part of the person's name to search for."
+            />
           </div>
           <div className="row">
             <button className="btn btn--primary" disabled={searchPerson.isPending} onClick={() => searchPerson.mutate()}>
@@ -53,10 +63,24 @@ export default function AgentToolsPage() {
         </section>
 
         <section className="card stack">
-          <h3>expand-node</h3>
+          <h3>
+            expand-node
+            <InfoTooltip text="Loads everyone and everything directly connected to a person or company." />
+          </h3>
           <div className="form-grid">
-            <Field label="Entity ID" value={expandId} onChange={setExpandId} />
-            <Field label="Depth" value={expandDepth} onChange={setExpandDepth} type="number" />
+            <Field
+              label="Entity ID"
+              value={expandId}
+              onChange={setExpandId}
+              info="The unique ID of the person or company to expand."
+            />
+            <Field
+              label="Depth"
+              value={expandDepth}
+              onChange={setExpandDepth}
+              type="number"
+              info="How many steps out from this entity to load."
+            />
           </div>
           <div className="row">
             <button
@@ -71,10 +95,13 @@ export default function AgentToolsPage() {
         </section>
 
         <section className="card stack">
-          <h3>shortest-path</h3>
+          <h3>
+            shortest-path
+            <InfoTooltip text="Finds the shortest chain of connections between two people or companies." />
+          </h3>
           <div className="form-grid">
-            <Field label="Source ID" value={pathSource} onChange={setPathSource} />
-            <Field label="Target ID" value={pathTarget} onChange={setPathTarget} />
+            <Field label="Source ID" value={pathSource} onChange={setPathSource} info="The starting entity's ID." />
+            <Field label="Target ID" value={pathTarget} onChange={setPathTarget} info="The destination entity's ID." />
           </div>
           <div className="row">
             <button
@@ -89,10 +116,23 @@ export default function AgentToolsPage() {
         </section>
 
         <section className="card stack">
-          <h3>merge-entities</h3>
+          <h3>
+            merge-entities
+            <InfoTooltip text="Combines two records that represent the same real person or company into one. This cannot be undone." />
+          </h3>
           <div className="form-grid">
-            <Field label="Source entity ID" value={mergeSource} onChange={setMergeSource} />
-            <Field label="Target entity ID" value={mergeTarget} onChange={setMergeTarget} />
+            <Field
+              label="Source entity ID"
+              value={mergeSource}
+              onChange={setMergeSource}
+              info="The duplicate record — it will be merged into the target and no longer exist on its own."
+            />
+            <Field
+              label="Target entity ID"
+              value={mergeTarget}
+              onChange={setMergeTarget}
+              info="The record that survives the merge."
+            />
           </div>
           <div className="row">
             <button
@@ -107,9 +147,12 @@ export default function AgentToolsPage() {
         </section>
 
         <section className="card stack">
-          <h3>calculate-risk</h3>
+          <h3>
+            calculate-risk
+            <InfoTooltip text="Scores how risky a person or company is, based on their connections and known flags." />
+          </h3>
           <div className="form-grid">
-            <Field label="Entity ID" value={riskId} onChange={setRiskId} />
+            <Field label="Entity ID" value={riskId} onChange={setRiskId} info="The unique ID of the person or company to score." />
           </div>
           <div className="row">
             <button

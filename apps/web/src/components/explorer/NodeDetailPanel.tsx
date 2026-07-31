@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { api } from '../../api/client'
+import InfoTooltip from '../common/InfoTooltip'
 
 interface Props {
   graphId: string
@@ -50,6 +51,7 @@ export default function NodeDetailPanel({
             <button className="btn btn--primary" onClick={onExpand} disabled={isExpanding}>
               {isExpanding ? 'Expanding…' : 'Expand neighbors'}
             </button>
+            <InfoTooltip text="Shows the other people or companies directly connected to this one, added onto the graph." />
             {isExpanded && (
               <button className="btn" onClick={onCollapse} disabled={isExpanding}>
                 Collapse

@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useNavigate } from 'react-router-dom'
 import { api } from '../api/client'
+import InfoTooltip from '../components/common/InfoTooltip'
 
 export default function GraphsListPage() {
   const queryClient = useQueryClient()
@@ -27,7 +28,10 @@ export default function GraphsListPage() {
     <main className="page">
       <div className="container stack">
         <section className="card stack">
-          <h2>Create a graph</h2>
+          <h2>
+            Create a graph
+            <InfoTooltip text="A graph is a map of people, companies, and how they're connected to each other — built automatically from your data." />
+          </h2>
           <p className="muted">
             Upload a CSV of relationships or entities and start exploring immediately — no
             query language required.
@@ -85,6 +89,7 @@ export default function GraphsListPage() {
                   >
                     Delete
                   </button>
+                  <InfoTooltip text="Permanently removes this graph and everything in it. This cannot be undone." />
                 </div>
               </div>
             ))}

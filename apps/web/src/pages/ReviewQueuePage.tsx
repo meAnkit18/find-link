@@ -5,6 +5,7 @@ import Field from '../components/common/Field'
 import JsonView from '../components/common/JsonView'
 import RunResult from '../components/common/RunResult'
 import GraphPicker from '../components/common/GraphPicker'
+import InfoTooltip from '../components/common/InfoTooltip'
 
 /** Review queue workbench: list pending items (optionally by queue type)
  * and approve/reject them — covers every /api/review-queue endpoint. */
@@ -36,16 +37,20 @@ export default function ReviewQueuePage() {
   return (
     <main className="page">
       <div className="container stack">
-        <h2 className="page-title">Review queue</h2>
+        <h2 className="page-title">
+          Review queue
+          <InfoTooltip text="Items the system flagged as needing a human decision before they're applied — e.g. merging two records that might be the same person." />
+        </h2>
 
         <section className="card stack">
           <div className="form-grid">
-            <GraphPicker value={graphId} onChange={setGraphId} />
+            <GraphPicker value={graphId} onChange={setGraphId} info="Which graph to list pending review items for." />
             <Field
               label="Queue type filter (optional)"
               value={queueType}
               onChange={setQueueType}
               placeholder="e.g. entity_merge"
+              info="Show only one kind of review item. Leave blank to see everything."
             />
           </div>
           <div className="row">
@@ -86,12 +91,18 @@ export default function ReviewQueuePage() {
               Decide <code className="mono">{selectedReviewId}</code>
             </h3>
             <div className="form-grid">
-              <Field label="Reviewed by" value={reviewedBy} onChange={setReviewedBy} />
+              <Field
+                label="Reviewed by"
+                value={reviewedBy}
+                onChange={setReviewedBy}
+                info="Your name or username, recorded against this decision."
+              />
               <Field
                 label="Reason (required to reject)"
                 value={reason}
                 onChange={setReason}
                 placeholder="why approving / rejecting"
+                info="A short note explaining your decision, kept for the record."
               />
             </div>
             <div className="row">

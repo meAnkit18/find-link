@@ -4,6 +4,7 @@ import { api } from '../api/client'
 import Field from '../components/common/Field'
 import JsonView from '../components/common/JsonView'
 import RunResult from '../components/common/RunResult'
+import InfoTooltip from '../components/common/InfoTooltip'
 
 /** Investigation cases workbench: create / list / inspect cases, attach
  * subjects, and add notes — covers every /api/cases endpoint. */
@@ -56,10 +57,24 @@ export default function CasesPage() {
         <section className="card stack">
           <h3>Create a case</h3>
           <div className="form-grid">
-            <Field label="Title" value={title} onChange={setTitle} placeholder="e.g. Suspicious vendor ring" />
-            <Field label="Created by" value={createdBy} onChange={setCreatedBy} />
+            <Field
+              label="Title"
+              value={title}
+              onChange={setTitle}
+              placeholder="e.g. Suspicious vendor ring"
+              info="A short name for this investigation, so you can find it again later."
+            />
+            <Field
+              label="Created by"
+              value={createdBy}
+              onChange={setCreatedBy}
+              info="Your name or username, recorded as the case owner."
+            />
             <label className="field">
-              <span className="field__label">Priority</span>
+              <span className="field__label">
+                Priority
+                <InfoTooltip text="How urgent this case is. Doesn't change what you can do — just helps sort the case list." />
+              </span>
               <select className="select" value={priority} onChange={(e) => setPriority(e.target.value)}>
                 <option value="low">low</option>
                 <option value="medium">medium</option>
@@ -108,6 +123,7 @@ export default function CasesPage() {
           <section className="card stack">
             <h3>
               Selected case <code className="mono">{selectedCaseId}</code>
+              <InfoTooltip text="A unique ID for this case, generated automatically." />
             </h3>
 
             {caseDetailQuery.isLoading && <p className="muted">Loading…</p>}
@@ -118,15 +134,25 @@ export default function CasesPage() {
               <JsonView data={caseDetailQuery.data} title="GET /api/cases/{case_id}" />
             )}
 
-            <h4>Add subject</h4>
+            <h4>
+              Add subject
+              <InfoTooltip text="A subject is a person or company this case is about. Attach them here so they show up in the case file." />
+            </h4>
             <div className="form-grid">
               <Field
                 label="Entity ID"
                 value={subjectEntityId}
                 onChange={setSubjectEntityId}
                 placeholder="vid of an entity in the graph"
+                info="The unique ID of the person or company in the graph, shown on their node detail panel."
               />
-              <Field label="Role" value={subjectRole} onChange={setSubjectRole} placeholder="primary / associate…" />
+              <Field
+                label="Role"
+                value={subjectRole}
+                onChange={setSubjectRole}
+                placeholder="primary / associate…"
+                info="How this subject relates to the case, e.g. primary suspect or associate."
+              />
             </div>
             <div className="row">
               <button
@@ -141,7 +167,10 @@ export default function CasesPage() {
 
             <h4>Add note</h4>
             <label className="field">
-              <span className="field__label">Note body</span>
+              <span className="field__label">
+                Note body
+                <InfoTooltip text="Free-text notes about this case, saved with a timestamp for the case record." />
+              </span>
               <textarea
                 className="input"
                 rows={3}

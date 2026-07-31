@@ -4,6 +4,7 @@ import { api } from '../api/client'
 import Field from '../components/common/Field'
 import GraphPicker from '../components/common/GraphPicker'
 import RunResult from '../components/common/RunResult'
+import InfoTooltip from '../components/common/InfoTooltip'
 
 /** Entities & risk workbench: entity search, fetch, graph expansion,
  * shortest path, risk scoring, and risk explanation — covers every
@@ -58,14 +59,30 @@ export default function EntitiesRiskPage() {
         </p>
 
         <section className="card stack">
-          <GraphPicker value={graphId} onChange={setGraphId} />
+          <GraphPicker
+            value={graphId}
+            onChange={setGraphId}
+            info="Only sets which graph the URL points to — see the note above."
+          />
         </section>
 
         <section className="card stack">
           <h3>Search entities</h3>
           <div className="form-grid">
-            <Field label="Entity type (tag)" value={entityType} onChange={setEntityType} placeholder="person" />
-            <Field label="Query" value={searchQ} onChange={setSearchQ} placeholder="substring of label" />
+            <Field
+              label="Entity type (tag)"
+              value={entityType}
+              onChange={setEntityType}
+              placeholder="person"
+              info="What kind of thing to search for, e.g. person, company, or address."
+            />
+            <Field
+              label="Query"
+              value={searchQ}
+              onChange={setSearchQ}
+              placeholder="substring of label"
+              info="Part of the name to search for — doesn't need to be exact."
+            />
           </div>
           <div className="row">
             <button
@@ -82,19 +99,34 @@ export default function EntitiesRiskPage() {
         <section className="card stack">
           <h3>Entity lookup, expansion &amp; risk</h3>
           <div className="form-grid">
-            <Field label="Entity ID (vid)" value={entityId} onChange={setEntityId} placeholder="e.g. person:abc123" />
-            <Field label="Expansion depth (1–5)" value={depth} onChange={setDepth} type="number" />
+            <Field
+              label="Entity ID (vid)"
+              value={entityId}
+              onChange={setEntityId}
+              placeholder="e.g. person:abc123"
+              info="The unique ID of the person or company, shown on their node detail panel in the graph explorer."
+            />
+            <Field
+              label="Expansion depth (1–5)"
+              value={depth}
+              onChange={setDepth}
+              type="number"
+              info="How many steps out from this entity to fetch when expanding the graph."
+            />
           </div>
           <div className="row" style={{ flexWrap: 'wrap' }}>
             <button className="btn" disabled={needsGraph || !entityId.trim()} onClick={() => getEntity.mutate()}>
               Get entity
             </button>
+            <InfoTooltip text="Fetch this entity's stored details." />
             <button className="btn" disabled={needsGraph || !entityId.trim()} onClick={() => expandGraph.mutate()}>
               Expand graph
             </button>
+            <InfoTooltip text="Fetch everyone and everything directly connected to this entity." />
             <button className="btn" disabled={needsGraph || !entityId.trim()} onClick={() => entityRisk.mutate()}>
               Calculate risk
             </button>
+            <InfoTooltip text="Score how risky this entity is, based on its connections and known flags." />
             <button
               className="btn"
               disabled={needsGraph || !entityId.trim()}
@@ -102,6 +134,7 @@ export default function EntitiesRiskPage() {
             >
               Explain risk
             </button>
+            <InfoTooltip text="Show the specific reasons behind this entity's risk score." />
           </div>
           <RunResult mutation={getEntity} title="GET …/entities/{entity_id}" />
           <RunResult mutation={expandGraph} title="GET …/entities/{entity_id}/graph" />
@@ -110,11 +143,20 @@ export default function EntitiesRiskPage() {
         </section>
 
         <section className="card stack">
-          <h3>Shortest path between two entities</h3>
+          <h3>
+            Shortest path between two entities
+            <InfoTooltip text="Finds the shortest chain of connections linking two people or companies." />
+          </h3>
           <div className="form-grid">
-            <Field label="Source vid" value={source} onChange={setSource} />
-            <Field label="Target vid" value={target} onChange={setTarget} />
-            <Field label="Max steps (1–10)" value={maxSteps} onChange={setMaxSteps} type="number" />
+            <Field label="Source vid" value={source} onChange={setSource} info="The starting entity's ID." />
+            <Field label="Target vid" value={target} onChange={setTarget} info="The destination entity's ID." />
+            <Field
+              label="Max steps (1–10)"
+              value={maxSteps}
+              onChange={setMaxSteps}
+              type="number"
+              info="The longest chain of connections to search before giving up."
+            />
           </div>
           <div className="row">
             <button
@@ -129,17 +171,27 @@ export default function EntitiesRiskPage() {
         </section>
 
         <section className="card stack">
-          <h3>Global risk endpoints (/api/risk)</h3>
+          <h3>
+            Global risk endpoints (/api/risk)
+            <InfoTooltip text="Same risk scoring as above, but always against the default graph regardless of what's picked at the top of this page." />
+          </h3>
           <div className="form-grid">
-            <Field label="Entity ID" value={riskEntityId} onChange={setRiskEntityId} />
+            <Field
+              label="Entity ID"
+              value={riskEntityId}
+              onChange={setRiskEntityId}
+              info="The unique ID of the person or company to score."
+            />
           </div>
           <div className="row">
             <button className="btn" disabled={!riskEntityId.trim()} onClick={() => globalRisk.mutate()}>
               GET /api/risk/{'{id}'}
             </button>
+            <InfoTooltip text="Score how risky this entity is." />
             <button className="btn" disabled={!riskEntityId.trim()} onClick={() => globalRiskExplain.mutate()}>
               GET /api/risk/{'{id}'}/explain
             </button>
+            <InfoTooltip text="Show the specific reasons behind this entity's risk score." />
           </div>
           <RunResult mutation={globalRisk} title="GET /api/risk/{entity_id}" />
           <RunResult mutation={globalRiskExplain} title="GET /api/risk/{entity_id}/explain" />

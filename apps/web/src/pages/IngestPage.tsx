@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import { api } from '../api/client'
 import type { EvidenceDetail, EvidenceSummary, ProcessingLogEntry } from '../api/types'
+import InfoTooltip from '../components/common/InfoTooltip'
 
 const INTEL_GRAPH_ID = 'intelligence_graph'
 
@@ -338,24 +339,33 @@ export default function IngestPage() {
         </p>
 
         <div className="card stack" style={{ maxWidth: 640 }}>
-          <h3 style={{ margin: 0 }}>Paste text</h3>
+          <h3 style={{ margin: 0 }}>
+            Paste text
+            <InfoTooltip text="Paste in a report, article, or other text. It will be scanned to find people, companies, and relationships to add to the graph." />
+          </h3>
           <input
+            className="input"
             placeholder="Source name (e.g. field-report-2026-07-13)"
             value={sourceName}
             onChange={(e) => setSourceName(e.target.value)}
           />
           <textarea
+            className="input"
             rows={7}
             placeholder="Paste an intelligence report, article, email, transcript…"
             value={text}
             onChange={(e) => setText(e.target.value)}
           />
-          <button
-            disabled={busy || !text.trim()}
-            onClick={() => ingestText.mutate()}
-          >
-            {ingestText.isPending ? 'Ingesting…' : 'Ingest text'}
-          </button>
+          <div className="row">
+            <button
+              className="btn btn--primary"
+              disabled={busy || !text.trim()}
+              onClick={() => ingestText.mutate()}
+            >
+              {ingestText.isPending && <span className="spinner" />}
+              {ingestText.isPending ? 'Ingesting…' : 'Ingest text'}
+            </button>
+          </div>
           {ingestText.isError && (
             <p style={{ color: 'var(--color-danger)', margin: 0 }}>
               {(ingestText.error as Error).message}
@@ -367,7 +377,10 @@ export default function IngestPage() {
 
         {review.length > 0 && (
           <div className="card stack">
-            <h3 style={{ margin: 0 }}>Needs review ({review.length})</h3>
+            <h3 style={{ margin: 0 }}>
+              Needs review ({review.length})
+              <InfoTooltip text="Facts the system wasn't fully confident about. Approve to add them to the graph, or reject to discard them." />
+            </h3>
             {review.slice(0, 8).map((item) => (
               <div key={item.id} className="row" style={{ justifyContent: 'space-between', gap: 8 }}>
                 <span style={{ flex: 1 }}>
@@ -375,10 +388,10 @@ export default function IngestPage() {
                   {item.reason}
                 </span>
                 <span className="row" style={{ gap: 6 }}>
-                  <button onClick={() => approve.mutate(item.id)} disabled={approve.isPending}>
+                  <button className="btn btn-sm btn--primary" onClick={() => approve.mutate(item.id)} disabled={approve.isPending}>
                     Approve
                   </button>
-                  <button onClick={() => reject.mutate(item.id)} disabled={reject.isPending}>
+                  <button className="btn btn-sm btn--danger" onClick={() => reject.mutate(item.id)} disabled={reject.isPending}>
                     Reject
                   </button>
                 </span>
@@ -408,6 +421,7 @@ export default function IngestPage() {
                     <StatusChip status={ev.status} cancelRequested={ev.cancel_requested} />
                     {active && (
                       <button
+                        className="btn btn-sm"
                         onClick={() => cancel.mutate(ev.id)}
                         disabled={cancel.isPending || stopping}
                         title="Stop the pipeline at the next stage boundary"
@@ -416,15 +430,15 @@ export default function IngestPage() {
                       </button>
                     )}
                     {(ev.status === 'failed' || ev.status === 'cancelled') && (
-                      <button onClick={() => retry.mutate(ev.id)} disabled={retry.isPending}>
+                      <button className="btn btn-sm" onClick={() => retry.mutate(ev.id)} disabled={retry.isPending}>
                         Retry
                       </button>
                     )}
                     {(TERMINAL.has(ev.status) || active) && (
                       <button
+                        className="btn btn-sm btn--danger"
                         onClick={() => onDelete(ev)}
                         disabled={deleteEv.isPending}
-                        style={{ color: 'var(--color-danger)', borderColor: 'var(--color-danger)' }}
                         title="Delete this evidence and everything extracted from it"
                       >
                         Delete
