@@ -108,3 +108,17 @@ def test_neighbors_with_edges_respects_limit(client, fake_clients, graph_with_da
     included = {body["nodes"][0]["vid"], "Alice"}
     for e in body["edges"]:
         assert e["src"] in included and e["dst"] in included
+
+
+def test_overview_main_tags_restricts_sampling(client, fake_clients, graph_with_data):
+    fake = fake_clients.for_space(graph_with_data["id"])
+    fake.metadata.create_tag(SimpleNamespace(name="place"))
+    fake.vertices.create_many("place", [("NYC", {"label": "NYC"})])
+
+    resp = client.get(
+        f"/api/graphs/{graph_with_data['id']}/overview", params={"main_tags": "entity"}
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert {n["label"] for n in body["nodes"]} == {"Alice", "Bob", "Cara"}
+    assert "NYC" not in {n["label"] for n in body["nodes"]}

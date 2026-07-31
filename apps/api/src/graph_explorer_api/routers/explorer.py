@@ -173,18 +173,25 @@ def get_neighbors_with_edges(
 def get_overview(
     graph_id: str,
     limit: int = Query(OVERVIEW_DEFAULT_LIMIT, ge=1, le=500),
+    main_tags: str | None = Query(
+        None, description="Comma-separated tag names to restrict sampling to"
+    ),
     registry: GraphRegistry = Depends(get_registry),
     clients: GraphClientCache = Depends(get_clients),
 ) -> SubgraphOut:
     """An initial subgraph so the explorer never opens on a blank canvas.
 
     Phase 1 approximation: sample up to `limit` vertices spread across the
-    graph's tags, then include only the edges between sampled vertices
-    (not every edge touching them) so the initial view stays legible.
+    graph's tags (or, if `main_tags` is set, just those tags), then include
+    only the edges between sampled vertices (not every edge touching them)
+    so the initial view stays legible.
     """
     graph = get_graph_or_404(graph_id, registry)
     client: GraphClient = clients.for_space(graph.space)
     tags = client.metadata.list_tags()
+    if main_tags:
+        wanted = {t.strip() for t in main_tags.split(",") if t.strip()}
+        tags = [t for t in tags if t in wanted]
     if not tags:
         return SubgraphOut(nodes=[], edges=[])
 
