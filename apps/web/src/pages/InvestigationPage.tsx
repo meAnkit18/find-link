@@ -1,13 +1,16 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
-import cytoscape from 'cytoscape'
-import fcose from 'cytoscape-fcose'
+import { useEffect, useRef, useState } from 'react'
 import { api } from '../api/client'
-import type { EntityGraph, EntityGraphNode, EntitySearchHit, RiskResult } from '../api/types'
+import type { EntityGraphNode, EntitySearchHit, GraphNode, RiskResult } from '../api/types'
 import GraphPicker from '../components/common/GraphPicker'
 import JsonView from '../components/common/JsonView'
 import InfoTooltip from '../components/common/InfoTooltip'
+import GraphCanvas, { type GraphCanvasHandle } from '../components/explorer/GraphCanvas'
+import GraphControls from '../components/explorer/GraphControls'
+import { useGraphCanvasState } from '../hooks/useGraphCanvasState'
 
-cytoscape.use(fcose)
+// Fixed to the canonical schema (packages/ingestion-core/src/ingestion_core/canonical.py):
+// person/company/organization are the hub entities everything else attaches to.
+const MAIN_TAGS = new Set(['person', 'company', 'organization'])
 
 export function riskColor(level: string): string {
   switch (level) {
@@ -20,12 +23,19 @@ export function riskColor(level: string): string {
   }
 }
 
-/** Investigation canvas: search people, load their neighborhood into a
- * Cytoscape canvas, inspect nodes, see risk scores, expand deeper, and run
- * shortest-path between two picked nodes. */
+function toGraphNode(n: EntityGraphNode): GraphNode {
+  const properties: Record<string, unknown> = {}
+  for (const props of Object.values(n.tags)) Object.assign(properties, props)
+  return { vid: n.id, tags: Object.keys(n.tags), label: n.label || n.id, properties }
+}
+
+/** Investigation canvas: search people, load their neighborhood into the
+ * shared graph canvas, inspect nodes, see risk scores, expand deeper by
+ * clicking a node (click again to collapse it), and run shortest-path
+ * between two picked nodes. */
 export function InvestigationGraphPage() {
-  const containerRef = useRef<HTMLDivElement | null>(null)
-  const cyRef = useRef<cytoscape.Core | null>(null)
+  const graphState = useGraphCanvasState()
+  const canvasRef = useRef<GraphCanvasHandle>(null)
 
   const [graphId, setGraphId] = useState('')
   const [searchQuery, setSearchQuery] = useState('')
@@ -33,101 +43,26 @@ export function InvestigationGraphPage() {
   const [searchResults, setSearchResults] = useState<EntitySearchHit[]>([])
   const [searchError, setSearchError] = useState<string | null>(null)
 
-  const [selectedNode, setSelectedNode] = useState<EntityGraphNode | null>(null)
+  const [selectedVid, setSelectedVid] = useState<string | null>(null)
+  const [expandedVids, setExpandedVids] = useState<Set<string>>(new Set())
+  const [zoom, setZoom] = useState(1)
+  const [isFullscreen, setIsFullscreen] = useState(false)
   const [risk, setRisk] = useState<RiskResult | null>(null)
   const [depth, setDepth] = useState(1)
   const [pathSource, setPathSource] = useState<string | null>(null)
   const [pathResult, setPathResult] = useState<unknown>(null)
   const [status, setStatus] = useState<string | null>(null)
 
-  const nodesRef = useRef<Map<string, EntityGraphNode>>(new Map())
-
+  // Reset canvas + selection state when the user picks a different graph.
   useEffect(() => {
-    if (!containerRef.current) return
-    const cy = cytoscape({
-      container: containerRef.current,
-      elements: [],
-      style: [
-        {
-          selector: 'node',
-          style: {
-            label: 'data(label)',
-            'background-color': '#2f6feb',
-            color: '#ffffff',
-            'text-wrap': 'wrap',
-            'text-max-width': '120px',
-            'font-size': 10,
-            width: 40,
-            height: 40,
-          },
-        },
-        {
-          selector: 'node:selected',
-          style: { 'border-width': 3, 'border-color': '#b5720a' },
-        },
-        {
-          selector: 'edge',
-          style: {
-            width: 2,
-            label: 'data(label)',
-            'curve-style': 'bezier',
-            'line-color': '#c7ccd6',
-            'target-arrow-color': '#c7ccd6',
-            'target-arrow-shape': 'triangle',
-            'font-size': 8,
-            color: '#667085',
-            'text-background-color': '#ffffff',
-            'text-background-opacity': 0.85,
-            'text-background-padding': '2px',
-          },
-        },
-      ],
-    })
-    cyRef.current = cy
-
-    cy.on('tap', 'node', (evt) => {
-      const id = evt.target.id() as string
-      const node = nodesRef.current.get(id) ?? { id, label: id, tags: {} }
-      setSelectedNode(node)
-    })
-    cy.on('tap', (evt) => {
-      if (evt.target === cy) setSelectedNode(null)
-    })
-
-    return () => {
-      cy.destroy()
-      cyRef.current = null
-    }
-  }, [])
-
-  const mergeGraph = useCallback((data: EntityGraph, replace: boolean) => {
-    const cy = cyRef.current
-    if (!cy) return
-    if (replace) {
-      cy.elements().remove()
-      nodesRef.current = new Map()
-    }
-    for (const node of data.nodes) {
-      nodesRef.current.set(node.id, node)
-      if (cy.getElementById(node.id).length === 0) {
-        cy.add({ group: 'nodes', data: { id: node.id, label: node.label || node.id } })
-      }
-    }
-    for (const edge of data.edges) {
-      const edgeId = `${edge.src}->${edge.dst}@${edge.edge_type}@${edge.rank}`
-      if (
-        cy.getElementById(edgeId).length === 0 &&
-        cy.getElementById(edge.src).length > 0 &&
-        cy.getElementById(edge.dst).length > 0
-      ) {
-        cy.add({
-          group: 'edges',
-          data: { id: edgeId, source: edge.src, target: edge.dst, label: edge.edge_type },
-        })
-      }
-    }
-    cy.layout({ name: 'fcose' }).run()
-  }, [])
+    graphState.reset()
+    setSelectedVid(null)
+    setExpandedVids(new Set())
+    setRisk(null)
+    setPathSource(null)
+    setPathResult(null)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [graphId])
 
   async function handleSearch() {
     if (!graphId || !searchQuery.trim()) return
@@ -147,16 +82,34 @@ export function InvestigationGraphPage() {
     setStatus(`Expanding ${entityId} (depth ${depth})…`)
     try {
       const data = await api.expandEntityGraph(graphId, entityId, depth)
-      mergeGraph(data, replace)
+      const nodes = data.nodes.map(toGraphNode)
+      if (replace) graphState.setOverview(nodes, data.edges)
+      else graphState.mergeExpansion(entityId, nodes, data.edges)
+      setExpandedVids((prev) => new Set(prev).add(entityId))
       setStatus(null)
     } catch (err) {
       setStatus(`✗ ${(err as Error).message}`)
     }
   }
 
+  function collapseEntity(entityId: string) {
+    graphState.collapse(entityId)
+    setExpandedVids((prev) => {
+      const next = new Set(prev)
+      next.delete(entityId)
+      return next
+    })
+  }
+
+  function toggleExpand(vid: string) {
+    if (expandedVids.has(vid)) collapseEntity(vid)
+    else void loadEntity(vid, false)
+  }
+
   async function handleSelectResult(hit: EntitySearchHit) {
     setSearchResults([])
     setSearchQuery('')
+    setSelectedVid(hit.entity_id)
     await loadEntity(hit.entity_id, true)
   }
 
@@ -181,6 +134,8 @@ export function InvestigationGraphPage() {
       setPathSource(null)
     }
   }
+
+  const selectedNode = selectedVid ? graphState.nodes.get(selectedVid) ?? null : null
 
   return (
     <main className="page page--flush explorer">
@@ -250,36 +205,68 @@ export function InvestigationGraphPage() {
       )}
 
       <div className="explorer-body">
-        <div className="explorer-center" ref={containerRef} />
+        <div className="explorer-center">
+          <GraphCanvas
+            ref={canvasRef}
+            key={graphId}
+            nodes={Array.from(graphState.nodes.values())}
+            edges={Array.from(graphState.edges.values())}
+            selectedVid={selectedVid}
+            mainTags={MAIN_TAGS}
+            onSelect={setSelectedVid}
+            onToggleExpand={toggleExpand}
+            onZoomChange={setZoom}
+          />
+          <GraphControls
+            onZoomIn={() => canvasRef.current?.zoomIn()}
+            onZoomOut={() => canvasRef.current?.zoomOut()}
+            onFit={() => canvasRef.current?.fit()}
+            onCenterSelected={() => canvasRef.current?.centerSelected()}
+            onRelayout={() => canvasRef.current?.relayout()}
+            onExportPng={() => canvasRef.current?.exportPng()}
+            onToggleFullscreen={() => {
+              if (!document.fullscreenElement) {
+                document.documentElement.requestFullscreen()
+                setIsFullscreen(true)
+              } else {
+                document.exitFullscreen()
+                setIsFullscreen(false)
+              }
+            }}
+            isFullscreen={isFullscreen}
+            hasSelection={selectedVid != null}
+            zoom={zoom}
+          />
+        </div>
 
         <div className="explorer-right">
           {selectedNode ? (
             <div className="panel stack">
-              <h3>{selectedNode.label || selectedNode.id}</h3>
-              <p className="text-secondary mono">{selectedNode.id}</p>
+              <h3>{selectedNode.label}</h3>
+              <p className="text-secondary mono">{selectedNode.vid}</p>
 
               <div className="row" style={{ flexWrap: 'wrap' }}>
-                <button className="btn btn--primary" onClick={() => loadEntity(selectedNode.id, false)}>
-                  Expand
+                <button className="btn btn--primary" onClick={() => toggleExpand(selectedNode.vid)}>
+                  {expandedVids.has(selectedNode.vid) ? 'Collapse' : 'Expand'}
                 </button>
-                <InfoTooltip text="Load everyone and everything directly connected to this node onto the graph." />
-                <button className="btn" onClick={() => fetchRisk(selectedNode.id)}>
+                <InfoTooltip text="Load everyone and everything directly connected to this node onto the graph, or collapse it back." />
+                <button className="btn" onClick={() => fetchRisk(selectedNode.vid)}>
                   Risk
                 </button>
                 <InfoTooltip text="Calculate a risk score for this person or company based on their connections and known flags." />
-                {pathSource && pathSource !== selectedNode.id ? (
-                  <button className="btn" onClick={() => runShortestPath(selectedNode.id)}>
+                {pathSource && pathSource !== selectedNode.vid ? (
+                  <button className="btn" onClick={() => runShortestPath(selectedNode.vid)}>
                     Path from {pathSource.slice(0, 12)}… → here
                   </button>
                 ) : (
-                  <button className="btn" onClick={() => setPathSource(selectedNode.id)}>
+                  <button className="btn" onClick={() => setPathSource(selectedNode.vid)}>
                     Path: set as source
                   </button>
                 )}
                 <InfoTooltip text="Find the shortest chain of connections between two people or companies. Pick a starting point here, then click another node to find the path to it." />
               </div>
 
-              {risk && risk.entity_id === selectedNode.id && (
+              {risk && risk.entity_id === selectedNode.vid && (
                 <div className="risk-section">
                   <h4>Risk assessment</h4>
                   <div className="risk-badge" style={{ background: riskColor(risk.level), color: '#fff' }}>
@@ -295,15 +282,18 @@ export function InvestigationGraphPage() {
                 </div>
               )}
 
-              <h4>Tags / properties</h4>
-              <JsonView data={selectedNode.tags} title="tags" initiallyOpen />
+              <h4>Properties</h4>
+              <JsonView data={selectedNode.properties} title="properties" initiallyOpen />
             </div>
           ) : (
             <div className="panel">
               <h3>Investigation tools</h3>
               <p className="text-secondary">
-                Pick a graph, search an entity, then click nodes on the canvas
-                to inspect, expand, score risk, or run a shortest path.
+                Pick a graph, search a person or company, then click it on the canvas to
+                inspect, expand its connections, score risk, or run a shortest path. Only
+                people, companies, and organizations show up front — click one to reveal
+                everything connected to it, and click an expanded node again to collapse
+                it.
               </p>
             </div>
           )}
