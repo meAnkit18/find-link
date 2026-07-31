@@ -11,7 +11,7 @@ covered by graph-core's own tests plus the owner's manual verification.
 
 from __future__ import annotations
 
-from graph_core.storage.result import RawVertex
+from graph_core.storage.result import RawEdge, RawVertex
 
 
 class FakeGraphStore:
@@ -87,6 +87,23 @@ class FakeTraversal:
                 found.append(src)
         vertices = (self._vertex(v) for v in dict.fromkeys(found))
         return [v for v in vertices if v is not None]
+
+    def get_neighbors_with_edges(
+        self, vid: str, edge_type: str | None = None, direction: str = "out"
+    ) -> tuple[list[RawVertex], list[RawEdge]]:
+        edges: list[RawEdge] = []
+        neighbor_ids: list[str] = []
+        for src, dst, et, rank, props in self.store.edges:
+            if edge_type is not None and et != edge_type:
+                continue
+            if direction in ("out", "both") and src == vid:
+                edges.append(RawEdge(src=src, dst=dst, edge_type=et, rank=rank, properties=dict(props)))
+                neighbor_ids.append(dst)
+            if direction in ("in", "both") and dst == vid:
+                edges.append(RawEdge(src=src, dst=dst, edge_type=et, rank=rank, properties=dict(props)))
+                neighbor_ids.append(src)
+        vertices = [v for v in (self._vertex(n) for n in dict.fromkeys(neighbor_ids)) if v is not None]
+        return vertices, edges
 
     def count_neighbors(self, vid: str, edge_type: str | None = None, direction: str = "out") -> int:
         return len(self.get_neighbors(vid, edge_type, direction))
