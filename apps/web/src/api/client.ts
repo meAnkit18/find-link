@@ -97,8 +97,25 @@ export const api = {
         limit: opts.limit,
       })}`,
     ),
-  getOverview: (graphId: string, limit = 40) =>
-    request<Subgraph>(`/api/graphs/${graphId}/overview${qs({ limit })}`),
+  getNeighborsWithEdges: (
+    graphId: string,
+    vid: string,
+    opts: { edgeType?: string; direction?: Direction; limit?: number } = {},
+  ) =>
+    request<Subgraph>(
+      `/api/graphs/${graphId}/nodes/${encodeURIComponent(vid)}/neighbors-with-edges${qs({
+        edge_type: opts.edgeType,
+        direction: opts.direction,
+        limit: opts.limit,
+      })}`,
+    ),
+  getOverview: (graphId: string, limit = 40, mainTags?: string[]) =>
+    request<Subgraph>(
+      `/api/graphs/${graphId}/overview${qs({
+        limit,
+        main_tags: mainTags && mainTags.length ? mainTags.join(',') : undefined,
+      })}`,
+    ),
 
   // -- Entities ---------------------------------------------------------------
   searchEntities: (graphId: string, q: string, entityType = 'person') =>
