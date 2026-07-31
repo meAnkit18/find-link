@@ -4,7 +4,8 @@ import { Link, useParams } from 'react-router-dom'
 import { api } from '../api/client'
 import type { GraphEdge, GraphNode, SearchResult } from '../api/types'
 import { useExplorerStore } from '../store/explorerStore'
-import GraphCanvas from '../components/explorer/GraphCanvas'
+import GraphCanvas, { type GraphCanvasHandle } from '../components/explorer/GraphCanvas'
+import GraphControls from '../components/explorer/GraphControls'
 import SearchBar from '../components/explorer/SearchBar'
 import FilterPanel from '../components/explorer/FilterPanel'
 import NodeDetailPanel from '../components/explorer/NodeDetailPanel'
@@ -27,6 +28,9 @@ export default function ExplorerPage() {
   const [graphData, setGraphData] = useState<GraphData>({ nodes: new Map(), edges: new Map() })
   const [expandingVids, setExpandingVids] = useState<Set<string>>(new Set())
   const [actionError, setActionError] = useState<string | null>(null)
+  const [zoom, setZoom] = useState(1)
+  const [isFullscreen, setIsFullscreen] = useState(false)
+  const canvasRef = useRef<GraphCanvasHandle>(null)
 
   const {
     selectedVid,
@@ -247,12 +251,36 @@ export default function ExplorerPage() {
             <>
               {graphId && (
                 <GraphCanvas
+                  ref={canvasRef}
                   key={graphId}
                   nodes={visibleNodes}
                   edges={visibleEdges}
                   selectedVid={selectedVid}
                   onSelect={select}
                   onExpand={expandNode}
+                  onZoomChange={setZoom}
+                />
+              )}
+              {graphId && (
+                <GraphControls
+                  onZoomIn={() => canvasRef.current?.zoomIn()}
+                  onZoomOut={() => canvasRef.current?.zoomOut()}
+                  onFit={() => canvasRef.current?.fit()}
+                  onCenterSelected={() => canvasRef.current?.centerSelected()}
+                  onRelayout={() => canvasRef.current?.relayout()}
+                  onExportPng={() => canvasRef.current?.exportPng()}
+                  onToggleFullscreen={() => {
+                    if (!document.fullscreenElement) {
+                      document.documentElement.requestFullscreen()
+                      setIsFullscreen(true)
+                    } else {
+                      document.exitFullscreen()
+                      setIsFullscreen(false)
+                    }
+                  }}
+                  isFullscreen={isFullscreen}
+                  hasSelection={selectedVid != null}
+                  zoom={zoom}
                 />
               )}
               {graphIsEmpty && (

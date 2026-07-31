@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useImperativeHandle, useRef, forwardRef, useCallback } from 'react'
 import cytoscape, { type Core, type ElementDefinition, type StylesheetStyle } from 'cytoscape'
 import fcose from 'cytoscape-fcose'
 import type { GraphEdge, GraphNode } from '../../api/types'
@@ -75,15 +75,28 @@ function ensureGraphVisible(cy: Core) {
   if (!overlaps) cy.fit(undefined, 40)
 }
 
+export interface GraphCanvasHandle {
+  zoomIn: () => void
+  zoomOut: () => void
+  fit: () => void
+  centerSelected: () => void
+  relayout: () => void
+  exportPng: () => void
+}
+
 interface Props {
   nodes: GraphNode[]
   edges: GraphEdge[]
   selectedVid: string | null
   onSelect: (vid: string | null) => void
   onExpand: (vid: string) => void
+  onZoomChange?: (zoom: number) => void
 }
 
-export default function GraphCanvas({ nodes, edges, selectedVid, onSelect, onExpand }: Props) {
+const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas(
+  { nodes, edges, selectedVid, onSelect, onExpand, onZoomChange },
+  ref,
+) {
   const containerRef = useRef<HTMLDivElement>(null)
   const cyRef = useRef<Core | null>(null)
   // Last known position of every node that has ever been shown, so filter
@@ -132,6 +145,54 @@ export default function GraphCanvas({ nodes, edges, selectedVid, onSelect, onExp
       cyRef.current = null
     }
   }, [])
+
+  const handleZoomChange = useCallback(() => {
+    const cy = cyRef.current
+    if (cy) onZoomChange?.(cy.zoom())
+  }, [onZoomChange])
+
+  useEffect(() => {
+    const cy = cyRef.current
+    if (!cy || !onZoomChange) return
+    cy.on('zoom', handleZoomChange)
+    return () => { cy.off('zoom', handleZoomChange) }
+  }, [onZoomChange, handleZoomChange])
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      zoomIn: () => (cyRef.current as any)?.zoomIn(),
+      zoomOut: () => (cyRef.current as any)?.zoomOut(),
+      fit: () => cyRef.current?.fit(undefined, 40),
+      centerSelected: () => cyRef.current?.fit(cyRef.current.$('node:selected'), 40),
+      relayout: () => {
+        const cy = cyRef.current
+        if (!cy) return
+        const fcoseOptions = {
+          name: 'fcose',
+          animate: false,
+          quality: 'draft',
+          randomize: false,
+          fit: false,
+          nodeRepulsion: 8000,
+          idealEdgeLength: 90,
+        } as unknown as cytoscape.LayoutOptions
+        cy.layout(fcoseOptions).run()
+      },
+      exportPng: () => {
+        const cy = cyRef.current
+        if (!cy) return
+        const blob = cy.png({ output: 'blob', bg: '#0f1115', full: true })
+        const url = URL.createObjectURL(blob)
+        const a = document.createElement('a')
+        a.href = url
+        a.download = 'graph.png'
+        a.click()
+        URL.revokeObjectURL(url)
+      },
+    }),
+    [],
+  )
 
   useEffect(() => {
     const cy = cyRef.current
@@ -192,7 +253,7 @@ export default function GraphCanvas({ nodes, edges, selectedVid, onSelect, onExp
       layout.one('layoutstop', () => {
         // Cache the settled positions of everything, then make sure the
         // result is actually on screen.
-        cy.nodes().forEach((ele) => positionsRef.current.set(ele.id(), { ...ele.position() }))
+        cy.nodes().forEach((ele) => { positionsRef.current.set(ele.id(), { ...ele.position() }) })
         if (!hadNodesBefore) cy.fit(undefined, 40)
         else ensureGraphVisible(cy)
       })
@@ -210,4 +271,6 @@ export default function GraphCanvas({ nodes, edges, selectedVid, onSelect, onExp
   }, [selectedVid])
 
   return <div ref={containerRef} style={{ width: '100%', height: '100%' }} />
-}
+})
+
+export default GraphCanvas
