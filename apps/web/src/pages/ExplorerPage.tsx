@@ -2,30 +2,18 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Link, useParams } from 'react-router-dom'
 import { api } from '../api/client'
-import type { GraphEdge, GraphNode, SearchResult } from '../api/types'
+import type { SearchResult } from '../api/types'
 import { useExplorerStore } from '../store/explorerStore'
+import { useGraphCanvasState } from '../hooks/useGraphCanvasState'
 import GraphCanvas, { type GraphCanvasHandle } from '../components/explorer/GraphCanvas'
 import GraphControls from '../components/explorer/GraphControls'
 import SearchBar from '../components/explorer/SearchBar'
 import FilterPanel from '../components/explorer/FilterPanel'
 import NodeDetailPanel from '../components/explorer/NodeDetailPanel'
 
-function edgeKey(edge: GraphEdge): string {
-  return `${edge.src}->${edge.dst}@${edge.edge_type}@${edge.rank}`
-}
-
-interface GraphData {
-  nodes: Map<string, GraphNode>
-  edges: Map<string, GraphEdge>
-}
-
 export default function ExplorerPage() {
   const { graphId } = useParams<{ graphId: string }>()
-  const rootVidsRef = useRef<Set<string>>(new Set())
-  // Edge keys each expansion added, so collapse removes only those (and not
-  // the original overview edges that happened to touch the same node).
-  const expansionEdgeKeysRef = useRef<Map<string, Set<string>>>(new Map())
-  const [graphData, setGraphData] = useState<GraphData>({ nodes: new Map(), edges: new Map() })
+  const graphState = useGraphCanvasState()
   const [expandingVids, setExpandingVids] = useState<Set<string>>(new Set())
   const [actionError, setActionError] = useState<string | null>(null)
   const [zoom, setZoom] = useState(1)
@@ -37,27 +25,28 @@ export default function ExplorerPage() {
     expandedVids,
     hiddenTags,
     hiddenEdgeTypes,
+    mainTags,
     select,
     markExpanded,
     markCollapsed,
     toggleTag,
     toggleEdgeType,
+    toggleMainTag,
     reset,
   } = useExplorerStore()
 
   const graphQuery = useQuery({ queryKey: ['graph', graphId], queryFn: () => api.getGraph(graphId!) })
   const schemaQuery = useQuery({ queryKey: ['schema', graphId], queryFn: () => api.getSchema(graphId!) })
+  const mainTagsKey = useMemo(() => Array.from(mainTags).sort().join(','), [mainTags])
   const overviewQuery = useQuery({
-    queryKey: ['overview', graphId],
-    queryFn: () => api.getOverview(graphId!, 40),
+    queryKey: ['overview', graphId, mainTagsKey],
+    queryFn: () => api.getOverview(graphId!, 40, mainTags.size > 0 ? Array.from(mainTags) : undefined),
   })
 
   // Reset canvas + selection state when navigating to a different graph.
   useEffect(() => {
     reset()
-    rootVidsRef.current = new Set()
-    expansionEdgeKeysRef.current = new Map()
-    setGraphData({ nodes: new Map(), edges: new Map() })
+    graphState.reset()
     setExpandingVids(new Set())
     setActionError(null)
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -65,61 +54,18 @@ export default function ExplorerPage() {
 
   useEffect(() => {
     if (!overviewQuery.data) return
-    rootVidsRef.current = new Set(overviewQuery.data.nodes.map((n) => n.vid))
-    setGraphData({
-      nodes: new Map(overviewQuery.data.nodes.map((n) => [n.vid, n])),
-      edges: new Map(overviewQuery.data.edges.map((e) => [edgeKey(e), e])),
-    })
+    graphState.setOverview(overviewQuery.data.nodes, overviewQuery.data.edges)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [overviewQuery.data])
 
   async function expandNode(vid: string) {
-    const edgeTypes = schemaQuery.data?.edge_types
-    if (!edgeTypes || edgeTypes.length === 0) {
-      // Without the schema we would fetch nothing; refusing (instead of
-      // silently marking the node expanded) keeps the UI honest.
-      setActionError('The graph schema is still loading — try expanding again in a moment.')
-      return
-    }
     if (expandingVids.has(vid)) return // an expansion for this node is already in flight
     setExpandingVids((prev) => new Set(prev).add(vid))
     setActionError(null)
 
     try {
-      const nextNodes: GraphNode[] = []
-      const nextEdges: GraphEdge[] = []
-
-      await Promise.all(
-        edgeTypes.map(async (edgeType) => {
-          const [outNeighbors, inNeighbors] = await Promise.all([
-            api.getNeighbors(graphId!, vid, { edgeType, direction: 'out', limit: 100 }),
-            api.getNeighbors(graphId!, vid, { edgeType, direction: 'in', limit: 100 }),
-          ])
-          for (const n of outNeighbors) {
-            nextNodes.push(n)
-            nextEdges.push({ src: vid, dst: n.vid, edge_type: edgeType, rank: 0, properties: {} })
-          }
-          for (const n of inNeighbors) {
-            nextNodes.push(n)
-            nextEdges.push({ src: n.vid, dst: vid, edge_type: edgeType, rank: 0, properties: {} })
-          }
-        }),
-      )
-
-      setGraphData((prev) => {
-        const nodes = new Map(prev.nodes)
-        nextNodes.forEach((n) => {
-          if (!nodes.has(n.vid)) nodes.set(n.vid, n)
-        })
-        const edges = new Map(prev.edges)
-        const addedKeys = expansionEdgeKeysRef.current.get(vid) ?? new Set<string>()
-        nextEdges.forEach((e) => {
-          const key = edgeKey(e)
-          if (!edges.has(key)) addedKeys.add(key)
-          edges.set(key, e)
-        })
-        expansionEdgeKeysRef.current.set(vid, addedKeys)
-        return { nodes, edges }
-      })
+      const subgraph = await api.getNeighborsWithEdges(graphId!, vid, { direction: 'both', limit: 200 })
+      graphState.mergeExpansion(vid, subgraph.nodes, subgraph.edges)
       markExpanded(vid)
     } catch (err) {
       setActionError(
@@ -135,38 +81,20 @@ export default function ExplorerPage() {
   }
 
   function collapseNode(vid: string) {
-    const addedKeys = expansionEdgeKeysRef.current.get(vid)
-    expansionEdgeKeysRef.current.delete(vid)
-    setGraphData((prev) => {
-      const edges = new Map(prev.edges)
-      if (addedKeys) {
-        for (const key of addedKeys) edges.delete(key)
-      }
-      const stillReferenced = new Set<string>()
-      for (const edge of edges.values()) {
-        stillReferenced.add(edge.src)
-        stillReferenced.add(edge.dst)
-      }
-      const nodes = new Map(prev.nodes)
-      for (const nodeVid of prev.nodes.keys()) {
-        if (nodeVid === vid) continue
-        if (rootVidsRef.current.has(nodeVid)) continue
-        if (stillReferenced.has(nodeVid)) continue
-        nodes.delete(nodeVid)
-      }
-      return { nodes, edges }
-    })
+    graphState.collapse(vid)
     markCollapsed(vid)
+  }
+
+  function toggleExpand(vid: string) {
+    if (expandedVids.has(vid)) collapseNode(vid)
+    else void expandNode(vid)
   }
 
   async function handleSearchResult(result: SearchResult) {
     try {
-      if (!graphData.nodes.has(result.vid)) {
+      if (!graphState.nodes.has(result.vid)) {
         const node = await api.getNode(graphId!, result.vid)
-        setGraphData((prev) => ({
-          nodes: new Map(prev.nodes).set(node.vid, node),
-          edges: prev.edges,
-        }))
+        graphState.addNode(node)
       }
       select(result.vid)
       setActionError(null)
@@ -178,20 +106,20 @@ export default function ExplorerPage() {
   }
 
   const visibleNodes = useMemo(
-    () => Array.from(graphData.nodes.values()).filter((n) => !n.tags.some((t) => hiddenTags.has(t))),
-    [graphData.nodes, hiddenTags],
+    () => Array.from(graphState.nodes.values()).filter((n) => !n.tags.some((t) => hiddenTags.has(t))),
+    [graphState.nodes, hiddenTags],
   )
   const visibleVids = useMemo(() => new Set(visibleNodes.map((n) => n.vid)), [visibleNodes])
   const visibleEdges = useMemo(
     () =>
-      Array.from(graphData.edges.values()).filter(
+      Array.from(graphState.edges.values()).filter(
         (e) => !hiddenEdgeTypes.has(e.edge_type) && visibleVids.has(e.src) && visibleVids.has(e.dst),
       ),
-    [graphData.edges, hiddenEdgeTypes, visibleVids],
+    [graphState.edges, hiddenEdgeTypes, visibleVids],
   )
 
-  const graphIsEmpty = overviewQuery.data != null && graphData.nodes.size === 0
-  const allFilteredOut = graphData.nodes.size > 0 && visibleNodes.length === 0
+  const graphIsEmpty = overviewQuery.data != null && graphState.nodes.size === 0
+  const allFilteredOut = graphState.nodes.size > 0 && visibleNodes.length === 0
 
   if (graphQuery.isError) {
     return (
@@ -223,8 +151,10 @@ export default function ExplorerPage() {
               schema={schemaQuery.data}
               hiddenTags={hiddenTags}
               hiddenEdgeTypes={hiddenEdgeTypes}
+              mainTags={mainTags}
               onToggleTag={toggleTag}
               onToggleEdgeType={toggleEdgeType}
+              onToggleMainTag={toggleMainTag}
             />
           </div>
         )}
@@ -256,8 +186,9 @@ export default function ExplorerPage() {
                   nodes={visibleNodes}
                   edges={visibleEdges}
                   selectedVid={selectedVid}
+                  mainTags={mainTags}
                   onSelect={select}
-                  onExpand={expandNode}
+                  onToggleExpand={toggleExpand}
                   onZoomChange={setZoom}
                 />
               )}
@@ -304,7 +235,7 @@ export default function ExplorerPage() {
               vid={selectedVid}
               isExpanded={expandedVids.has(selectedVid)}
               isExpanding={expandingVids.has(selectedVid)}
-              onExpand={() => expandNode(selectedVid)}
+              onExpand={() => void expandNode(selectedVid)}
               onCollapse={() => collapseNode(selectedVid)}
               onClose={() => select(null)}
             />
