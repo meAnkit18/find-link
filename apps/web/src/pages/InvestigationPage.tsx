@@ -4,7 +4,10 @@ import type { EntityGraphNode, EntitySearchHit, GraphNode, RiskResult } from '..
 import JsonView from '../components/common/JsonView'
 import InfoTooltip from '../components/common/InfoTooltip'
 import GraphCanvas, { type GraphCanvasHandle } from '../components/explorer/GraphCanvas'
+import GraphCanvas3D from '../components/explorer/GraphCanvas3D'
 import GraphControls from '../components/explorer/GraphControls'
+import { roleForNode } from '../components/explorer/graphStyle'
+import { computeVisibleGraph } from '../components/explorer/graphVisibility'
 import { useGraphCanvasState } from '../hooks/useGraphCanvasState'
 
 // Fixed to the canonical schema (packages/ingestion-core/src/ingestion_core/canonical.py):
@@ -34,7 +37,13 @@ function toGraphNode(n: EntityGraphNode): GraphNode {
  * between two picked nodes. */
 export function InvestigationGraphPage() {
   const graphState = useGraphCanvasState()
-  const canvasRef = useRef<GraphCanvasHandle>(null)
+  const [view, setView] = useState<'2d' | '3d'>('2d')
+  const canvas2DRef = useRef<GraphCanvasHandle>(null)
+  const canvas3DRef = useRef<GraphCanvasHandle>(null)
+
+  function activeCanvas(): GraphCanvasHandle | null {
+    return view === '2d' ? canvas2DRef.current : canvas3DRef.current
+  }
 
   const [searchQuery, setSearchQuery] = useState('')
   const [searchResults, setSearchResults] = useState<EntitySearchHit[]>([])
@@ -43,6 +52,7 @@ export function InvestigationGraphPage() {
   const [selectedVid, setSelectedVid] = useState<string | null>(null)
   const [expandedVids, setExpandedVids] = useState<Set<string>>(new Set())
   const [expandingVids, setExpandingVids] = useState<Set<string>>(new Set())
+  const [revealedVids, setRevealedVids] = useState<Set<string>>(new Set())
   const [zoom, setZoom] = useState(1)
   const [isFullscreen, setIsFullscreen] = useState(false)
   const [risk, setRisk] = useState<RiskResult | null>(null)
@@ -97,19 +107,31 @@ export function InvestigationGraphPage() {
     }
   }
 
-  function collapseEntity(entityId: string) {
-    graphState.collapse(entityId)
-    setExpandedVids((prev) => {
-      const next = new Set(prev)
-      next.delete(entityId)
-      return next
-    })
+  function nodeRole(vid: string): 'main' | 'sub' {
+    const node = graphState.nodes.get(vid)
+    if (!node) return 'sub'
+    return roleForNode(node, MAIN_TAGS)
   }
 
-  function toggleExpand(vid: string) {
-    if (expandingVids.has(vid)) return
-    if (expandedVids.has(vid)) collapseEntity(vid)
-    else void loadEntity(vid, false)
+  /** Reveal (or hide) a main node's own already-loaded sub-nodes — a pure,
+   * instant visibility toggle, decoupled from network fetching. The first
+   * time a main node is revealed, if we've never fetched its neighborhood
+   * (true for any main node discovered only as someone else's neighbor),
+   * also fetch it so there's something to reveal. Hiding never discards
+   * fetched data — re-revealing is instant, no spinner. Sub nodes have no
+   * expand affordance; clicking one is select-only. */
+  function toggleReveal(vid: string) {
+    if (nodeRole(vid) !== 'main') return
+    const alreadyRevealed = revealedVids.has(vid)
+    setRevealedVids((prev) => {
+      const next = new Set(prev)
+      if (alreadyRevealed) next.delete(vid)
+      else next.add(vid)
+      return next
+    })
+    if (!alreadyRevealed && !expandedVids.has(vid)) {
+      void loadEntity(vid, false)
+    }
   }
 
   async function handleSelectResult(hit: EntitySearchHit) {
@@ -142,8 +164,16 @@ export function InvestigationGraphPage() {
   }
 
   const selectedNode = selectedVid ? graphState.nodes.get(selectedVid) ?? null : null
-  const canvasNodes = useMemo(() => Array.from(graphState.nodes.values()), [graphState.nodes])
-  const canvasEdges = useMemo(() => Array.from(graphState.edges.values()), [graphState.edges])
+  const { visibleNodes: canvasNodes, visibleEdges: canvasEdges } = useMemo(
+    () =>
+      computeVisibleGraph(
+        Array.from(graphState.nodes.values()),
+        Array.from(graphState.edges.values()),
+        MAIN_TAGS,
+        revealedVids,
+      ),
+    [graphState.nodes, graphState.edges, revealedVids],
+  )
 
   return (
     <main className="page page--flush explorer">
@@ -199,23 +229,37 @@ export function InvestigationGraphPage() {
 
       <div className="explorer-body">
         <div className="explorer-center">
-          <GraphCanvas
-            ref={canvasRef}
-            nodes={canvasNodes}
-            edges={canvasEdges}
-            selectedVid={selectedVid}
-            mainTags={MAIN_TAGS}
-            onSelect={setSelectedVid}
-            onToggleExpand={toggleExpand}
-            onZoomChange={setZoom}
-          />
+          {view === '2d' ? (
+            <GraphCanvas
+              ref={canvas2DRef}
+              nodes={canvasNodes}
+              edges={canvasEdges}
+              selectedVid={selectedVid}
+              mainTags={MAIN_TAGS}
+              onSelect={setSelectedVid}
+              onToggleExpand={toggleReveal}
+              onZoomChange={setZoom}
+            />
+          ) : (
+            <GraphCanvas3D
+              ref={canvas3DRef}
+              nodes={canvasNodes}
+              edges={canvasEdges}
+              selectedVid={selectedVid}
+              mainTags={MAIN_TAGS}
+              onSelect={setSelectedVid}
+              onToggleExpand={toggleReveal}
+            />
+          )}
           <GraphControls
-            onZoomIn={() => canvasRef.current?.zoomIn()}
-            onZoomOut={() => canvasRef.current?.zoomOut()}
-            onFit={() => canvasRef.current?.fit()}
-            onCenterSelected={() => canvasRef.current?.centerSelected()}
-            onRelayout={() => canvasRef.current?.relayout()}
-            onExportPng={() => canvasRef.current?.exportPng()}
+            view={view}
+            onToggleView={() => setView((v) => (v === '2d' ? '3d' : '2d'))}
+            onZoomIn={() => activeCanvas()?.zoomIn()}
+            onZoomOut={() => activeCanvas()?.zoomOut()}
+            onFit={() => activeCanvas()?.fit()}
+            onCenterSelected={() => activeCanvas()?.centerSelected()}
+            onRelayout={() => activeCanvas()?.relayout()}
+            onExportPng={() => activeCanvas()?.exportPng()}
             onToggleFullscreen={() => {
               if (!document.fullscreenElement) {
                 document.documentElement.requestFullscreen()
@@ -238,18 +282,22 @@ export function InvestigationGraphPage() {
               <p className="text-secondary mono">{selectedNode.vid}</p>
 
               <div className="row" style={{ flexWrap: 'wrap' }}>
-                <button
-                  className="btn btn--primary"
-                  onClick={() => toggleExpand(selectedNode.vid)}
-                  disabled={expandingVids.has(selectedNode.vid)}
-                >
-                  {expandingVids.has(selectedNode.vid)
-                    ? 'Expanding…'
-                    : expandedVids.has(selectedNode.vid)
-                      ? 'Collapse'
-                      : 'Expand'}
-                </button>
-                <InfoTooltip text="Load everyone and everything directly connected to this node onto the graph, or collapse it back." />
+                {nodeRole(selectedNode.vid) === 'main' && (
+                  <>
+                    <button
+                      className="btn btn--primary"
+                      onClick={() => toggleReveal(selectedNode.vid)}
+                      disabled={expandingVids.has(selectedNode.vid)}
+                    >
+                      {expandingVids.has(selectedNode.vid)
+                        ? 'Loading…'
+                        : revealedVids.has(selectedNode.vid)
+                          ? 'Hide details'
+                          : 'Show details'}
+                    </button>
+                    <InfoTooltip text="Reveal or hide this person's or company's own attribute nodes (phone, email, address, ...) on the canvas." />
+                  </>
+                )}
                 <button className="btn" onClick={() => fetchRisk(selectedNode.vid)}>
                   Risk
                 </button>
