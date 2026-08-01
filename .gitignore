@@ -35,3 +35,4 @@ evidence_store.db-shm
 evidence_store.db-wal
 evidence_store/
 .superpowers/
+.worktrees/
