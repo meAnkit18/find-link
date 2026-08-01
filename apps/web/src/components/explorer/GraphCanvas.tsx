@@ -16,9 +16,9 @@ const STYLE: StylesheetStyle[] = [
       'font-size': 10,
       'text-valign': 'bottom',
       'text-margin-y': 6,
-      width: 26,
-      height: 26,
-      'border-width': 2,
+      width: 18,
+      height: 18,
+      'border-width': 1.5,
       'border-color': '#ffffff',
       'text-outline-width': 2,
       'text-outline-color': '#f6f7f9',
@@ -29,11 +29,11 @@ const STYLE: StylesheetStyle[] = [
     // muted, so hub-vs-attribute reads at a glance without reading labels.
     selector: 'node[role = "sub"]',
     style: {
-      width: 15,
-      height: 15,
+      width: 10,
+      height: 10,
       'font-size': 8,
       'border-width': 1,
-      opacity: 0.8,
+      opacity: 0.75,
     },
   },
   {
@@ -53,8 +53,19 @@ const STYLE: StylesheetStyle[] = [
       'font-size': 8,
       color: '#667085',
       'text-background-color': '#ffffff',
-      'text-background-opacity': 0.85,
+      'text-background-opacity': 0,
       'text-background-padding': '2px',
+      'text-opacity': 0,
+    },
+  },
+  {
+    // Relationship labels are only shown on demand (hover, or touching the
+    // selected node) — permanently-visible edge labels were the biggest
+    // source of visual clutter on any graph with more than a few edges.
+    selector: 'edge.edge-hover, edge.edge-highlight',
+    style: {
+      'text-opacity': 1,
+      'text-background-opacity': 0.85,
     },
   },
 ]
@@ -67,6 +78,20 @@ function ensureGraphVisible(cy: Core) {
   const ext = cy.extent()
   const overlaps = bb.x1 < ext.x2 && bb.x2 > ext.x1 && bb.y1 < ext.y2 && bb.y2 > ext.y1
   if (!overlaps) cy.fit(undefined, 40)
+}
+
+/** Shared fcose tuning for both the initial/incremental layout (data-sync
+ * effect) and the manual "re-run layout" control — kept in one place so the
+ * two call sites can't drift out of sync. Wider spacing than fcose's
+ * defaults so nodes don't visually overlap once there are more than a
+ * handful on screen. */
+const FCOSE_LAYOUT_BASE = {
+  name: 'fcose',
+  animate: false,
+  quality: 'draft',
+  fit: false,
+  nodeRepulsion: 12000,
+  idealEdgeLength: 130,
 }
 
 export interface GraphCanvasHandle {
@@ -135,6 +160,8 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas(
     cy.on('dragfree', 'node', (evt) => {
       positionsRef.current.set(evt.target.id(), { ...evt.target.position() })
     })
+    cy.on('mouseover', 'edge', (evt) => evt.target.addClass('edge-hover'))
+    cy.on('mouseout', 'edge', (evt) => evt.target.removeClass('edge-hover'))
 
     // Cytoscape caches its container's size and offset. The container
     // changes size whenever the detail panel opens/closes, the filter panel
@@ -180,16 +207,9 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas(
       relayout: () => {
         const cy = cyRef.current
         if (!cy) return
-        const fcoseOptions = {
-          name: 'fcose',
-          animate: false,
-          quality: 'draft',
-          randomize: false,
-          fit: false,
-          nodeRepulsion: 8000,
-          idealEdgeLength: 90,
-        } as unknown as cytoscape.LayoutOptions
-        cy.layout(fcoseOptions).run()
+        // fcose's options (animate/randomize/nodeRepulsion/...) aren't part of
+        // @types/cytoscape's built-in layout typings, hence the cast.
+        cy.layout({ ...FCOSE_LAYOUT_BASE, randomize: false } as unknown as cytoscape.LayoutOptions).run()
       },
       exportPng: () => {
         const cy = cyRef.current
@@ -272,16 +292,9 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas(
     if (brandNewCount > 0) {
       // fcose's options (animate/randomize/nodeRepulsion/...) aren't part of
       // @types/cytoscape's built-in layout typings, hence the cast.
-      const fcoseOptions = {
-        name: 'fcose',
-        animate: false,
-        quality: 'draft',
-        randomize: !hadNodesBefore,
-        fit: false,
-        nodeRepulsion: 8000,
-        idealEdgeLength: 90,
-      } as unknown as cytoscape.LayoutOptions
-      const layout = cy.layout(fcoseOptions)
+      const layout = cy.layout(
+        { ...FCOSE_LAYOUT_BASE, randomize: !hadNodesBefore } as unknown as cytoscape.LayoutOptions,
+      )
       layout.one('layoutstop', () => {
         // Cache the settled positions of everything, then make sure the
         // result is actually on screen.
@@ -299,7 +312,12 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas(
     const cy = cyRef.current
     if (!cy) return
     cy.nodes().unselect()
-    if (selectedVid) cy.getElementById(selectedVid).select()
+    cy.edges().removeClass('edge-highlight')
+    if (selectedVid) {
+      const node = cy.getElementById(selectedVid)
+      node.select()
+      node.connectedEdges().addClass('edge-highlight')
+    }
   }, [selectedVid])
 
   return <div ref={containerRef} style={{ width: '100%', height: '100%' }} />
