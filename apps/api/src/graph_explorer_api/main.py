@@ -110,8 +110,8 @@ async def lifespan(app: FastAPI):
         client = app.state.clients.for_space(space)
         ensure_ingest_schema(client, space)
         app.state.registry.ensure(space, INTEL_GRAPH_NAME)
-        app.state.graph_service = GraphService(client)
-        app.state.investigation_service = InvestigationService(client)
+        app.state.graph_service = GraphService(app.state.clients, space)
+        app.state.investigation_service = InvestigationService(app.state.clients, space)
         logger.info("intelligence space '%s' ready; ingest schema ensured", space)
     except Exception:
         logger.exception(

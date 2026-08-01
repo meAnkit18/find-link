@@ -3,10 +3,20 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 
+from graph_core.client import GraphClient
+from graph_explorer_api.graph_clients import GraphClientCache
+
 
 class InvestigationService:
-    def __init__(self, client) -> None:
-        self.client = client
+    def __init__(self, clients: GraphClientCache, space: str) -> None:
+        self._clients = clients
+        self._space = space
+
+    @property
+    def client(self) -> GraphClient:
+        """Resolve the current client so a drop/recreate cycle doesn't leave
+        this service holding a closed connection pool."""
+        return self._clients.for_space(self._space)
 
     def create_case(self, title: str, created_by: str, priority: str = "medium") -> dict:
         case_id = f"case:{uuid.uuid4().hex}"

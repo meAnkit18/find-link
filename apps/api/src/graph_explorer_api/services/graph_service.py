@@ -3,11 +3,19 @@ from __future__ import annotations
 from graph_core.client import GraphClient
 from graph_core.merge import MergePlan
 from graph_core.storage.serialization import to_ngql_literal
+from graph_explorer_api.graph_clients import GraphClientCache
 
 
 class GraphService:
-    def __init__(self, client: GraphClient) -> None:
-        self.client = client
+    def __init__(self, clients: GraphClientCache, space: str) -> None:
+        self._clients = clients
+        self._space = space
+
+    @property
+    def client(self) -> GraphClient:
+        """Resolve the current client so a drop/recreate cycle doesn't leave
+        this service holding a closed connection pool."""
+        return self._clients.for_space(self._space)
 
     def get_entity(self, entity_id: str):
         query = f"FETCH PROP ON * {to_ngql_literal(str(entity_id))} YIELD VERTEX AS v"
