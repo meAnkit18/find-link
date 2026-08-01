@@ -21,14 +21,15 @@ def session_scope(
     statements (CREATE SPACE, SHOW SPACES, DROP SPACE) that must run before
     the configured space necessarily exists yet.
     """
-    session = connection_pool.pool.get_session(config.user, config.password)
-    try:
-        if use_space:
-            use_resp = session.execute(f"USE {config.space}")
-            if not use_resp.is_succeeded():
-                raise GraphConnectionError(
-                    f"Failed to switch to space {config.space!r}: {use_resp.error_msg()}"
-                )
-        yield session
-    finally:
-        session.release()
+    with connection_pool.session_lock:
+        session = connection_pool.pool.get_session(config.user, config.password)
+        try:
+            if use_space:
+                use_resp = session.execute(f"USE {config.space}")
+                if not use_resp.is_succeeded():
+                    raise GraphConnectionError(
+                        f"Failed to switch to space {config.space!r}: {use_resp.error_msg()}"
+                    )
+            yield session
+        finally:
+            session.release()

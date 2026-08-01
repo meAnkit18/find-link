@@ -9,6 +9,7 @@ importable and testable without nebula3-python installed.
 
 from __future__ import annotations
 
+import threading
 from collections.abc import Callable
 from typing import Any
 
@@ -53,6 +54,11 @@ class GraphConnectionPool:
         self._config = config
         self._pool_factory = pool_factory or _default_pool_factory
         self._pool: Any | None = None
+        # nebula3-python's ConnectionPool is not safe for concurrent
+        # get_session/release: rapid session churn makes graphd kill one
+        # session's in-flight query with "Execution had been killed". Serialize
+        # session checkout so only one session is out of the pool at a time.
+        self.session_lock = threading.Lock()
 
     def start(self) -> None:
         """Initialize the underlying connection pool. Raises GraphConnectionError on failure."""
