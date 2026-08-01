@@ -1,6 +1,11 @@
 import InfoTooltip from '../common/InfoTooltip'
 
 interface Props {
+  /** Both optional — Explorer doesn't pass them and keeps today's behavior
+   * unchanged (no toggle button, zoom indicator always shown). Investigation
+   * passes both to enable the 2D/3D switch. */
+  view?: '2d' | '3d'
+  onToggleView?: () => void
   onZoomIn: () => void
   onZoomOut: () => void
   onFit: () => void
@@ -14,6 +19,8 @@ interface Props {
 }
 
 export default function GraphControls({
+  view = '2d',
+  onToggleView,
   onZoomIn,
   onZoomOut,
   onFit,
@@ -32,6 +39,18 @@ export default function GraphControls({
           <InfoTooltip text="Zoom, fit, rearrange, save as an image, or view the graph full-screen. Hover any button to see what it does." />
         </div>
         <div className="graph-controls__divider" />
+        {onToggleView && (
+          <>
+            <button
+              className="graph-controls__btn graph-controls__btn--label"
+              title={view === '2d' ? 'Switch to 3D view' : 'Switch to 2D view'}
+              onClick={onToggleView}
+            >
+              {view === '2d' ? '3D' : '2D'}
+            </button>
+            <div className="graph-controls__divider" />
+          </>
+        )}
         <button className="graph-controls__btn" title="Zoom in (+)" onClick={onZoomIn}>
           {'\u002B'}
         </button>
@@ -66,9 +85,11 @@ export default function GraphControls({
         </button>
       </div>
 
-      <div className="graph-zoom-indicator" aria-live="polite">
-        {Math.round(zoom * 100)}%
-      </div>
+      {view === '2d' && (
+        <div className="graph-zoom-indicator" aria-live="polite">
+          {Math.round(zoom * 100)}%
+        </div>
+      )}
     </>
   )
 }

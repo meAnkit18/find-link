@@ -4,6 +4,7 @@ import type { EntityGraphNode, EntitySearchHit, GraphNode, RiskResult } from '..
 import JsonView from '../components/common/JsonView'
 import InfoTooltip from '../components/common/InfoTooltip'
 import GraphCanvas, { type GraphCanvasHandle } from '../components/explorer/GraphCanvas'
+import GraphCanvas3D from '../components/explorer/GraphCanvas3D'
 import GraphControls from '../components/explorer/GraphControls'
 import { roleForNode } from '../components/explorer/graphStyle'
 import { computeVisibleGraph } from '../components/explorer/graphVisibility'
@@ -36,7 +37,13 @@ function toGraphNode(n: EntityGraphNode): GraphNode {
  * between two picked nodes. */
 export function InvestigationGraphPage() {
   const graphState = useGraphCanvasState()
-  const canvasRef = useRef<GraphCanvasHandle>(null)
+  const [view, setView] = useState<'2d' | '3d'>('2d')
+  const canvas2DRef = useRef<GraphCanvasHandle>(null)
+  const canvas3DRef = useRef<GraphCanvasHandle>(null)
+
+  function activeCanvas(): GraphCanvasHandle | null {
+    return view === '2d' ? canvas2DRef.current : canvas3DRef.current
+  }
 
   const [searchQuery, setSearchQuery] = useState('')
   const [searchResults, setSearchResults] = useState<EntitySearchHit[]>([])
@@ -222,23 +229,37 @@ export function InvestigationGraphPage() {
 
       <div className="explorer-body">
         <div className="explorer-center">
-          <GraphCanvas
-            ref={canvasRef}
-            nodes={canvasNodes}
-            edges={canvasEdges}
-            selectedVid={selectedVid}
-            mainTags={MAIN_TAGS}
-            onSelect={setSelectedVid}
-            onToggleExpand={toggleReveal}
-            onZoomChange={setZoom}
-          />
+          {view === '2d' ? (
+            <GraphCanvas
+              ref={canvas2DRef}
+              nodes={canvasNodes}
+              edges={canvasEdges}
+              selectedVid={selectedVid}
+              mainTags={MAIN_TAGS}
+              onSelect={setSelectedVid}
+              onToggleExpand={toggleReveal}
+              onZoomChange={setZoom}
+            />
+          ) : (
+            <GraphCanvas3D
+              ref={canvas3DRef}
+              nodes={canvasNodes}
+              edges={canvasEdges}
+              selectedVid={selectedVid}
+              mainTags={MAIN_TAGS}
+              onSelect={setSelectedVid}
+              onToggleExpand={toggleReveal}
+            />
+          )}
           <GraphControls
-            onZoomIn={() => canvasRef.current?.zoomIn()}
-            onZoomOut={() => canvasRef.current?.zoomOut()}
-            onFit={() => canvasRef.current?.fit()}
-            onCenterSelected={() => canvasRef.current?.centerSelected()}
-            onRelayout={() => canvasRef.current?.relayout()}
-            onExportPng={() => canvasRef.current?.exportPng()}
+            view={view}
+            onToggleView={() => setView((v) => (v === '2d' ? '3d' : '2d'))}
+            onZoomIn={() => activeCanvas()?.zoomIn()}
+            onZoomOut={() => activeCanvas()?.zoomOut()}
+            onFit={() => activeCanvas()?.fit()}
+            onCenterSelected={() => activeCanvas()?.centerSelected()}
+            onRelayout={() => activeCanvas()?.relayout()}
+            onExportPng={() => activeCanvas()?.exportPng()}
             onToggleFullscreen={() => {
               if (!document.fullscreenElement) {
                 document.documentElement.requestFullscreen()
