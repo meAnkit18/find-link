@@ -1,7 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { api } from '../api/client'
 import type { EntityGraphNode, EntitySearchHit, GraphNode, RiskResult } from '../api/types'
-import GraphPicker from '../components/common/GraphPicker'
 import JsonView from '../components/common/JsonView'
 import InfoTooltip from '../components/common/InfoTooltip'
 import GraphCanvas, { type GraphCanvasHandle } from '../components/explorer/GraphCanvas'
@@ -37,9 +36,7 @@ export function InvestigationGraphPage() {
   const graphState = useGraphCanvasState()
   const canvasRef = useRef<GraphCanvasHandle>(null)
 
-  const [graphId, setGraphId] = useState('')
   const [searchQuery, setSearchQuery] = useState('')
-  const [entityType, setEntityType] = useState('person')
   const [searchResults, setSearchResults] = useState<EntitySearchHit[]>([])
   const [searchError, setSearchError] = useState<string | null>(null)
 
@@ -54,23 +51,11 @@ export function InvestigationGraphPage() {
   const [pathResult, setPathResult] = useState<unknown>(null)
   const [status, setStatus] = useState<string | null>(null)
 
-  // Reset canvas + selection state when the user picks a different graph.
-  useEffect(() => {
-    graphState.reset()
-    setSelectedVid(null)
-    setExpandedVids(new Set())
-    setExpandingVids(new Set())
-    setRisk(null)
-    setPathSource(null)
-    setPathResult(null)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [graphId])
-
   async function handleSearch() {
-    if (!graphId || !searchQuery.trim()) return
+    if (!searchQuery.trim()) return
     setSearchError(null)
     try {
-      const results = await api.searchEntities(graphId, searchQuery.trim(), entityType.trim() || 'person')
+      const results = await api.searchEntities(searchQuery.trim())
       setSearchResults(results)
       if (results.length === 0) setSearchError('No matches.')
     } catch (err) {
@@ -80,12 +65,11 @@ export function InvestigationGraphPage() {
   }
 
   async function loadEntity(entityId: string, replace: boolean) {
-    if (!graphId) return
     if (expandingVids.has(entityId)) return
     setExpandingVids((prev) => new Set(prev).add(entityId))
     setStatus(`Expanding ${entityId} (depth ${depth})…`)
     try {
-      const data = await api.expandEntityGraph(graphId, entityId, depth)
+      const data = await api.expandEntityGraph(entityId, depth)
       const nodes = data.nodes.map(toGraphNode)
       if (replace) {
         const rootNode = nodes.find((n) => n.vid === entityId) ?? {
@@ -138,17 +122,17 @@ export function InvestigationGraphPage() {
   async function fetchRisk(entityId: string) {
     setRisk(null)
     try {
-      setRisk(await api.getEntityRisk(graphId, entityId))
+      setRisk(await api.getEntityRisk(entityId))
     } catch (err) {
       setStatus(`✗ risk: ${(err as Error).message}`)
     }
   }
 
   async function runShortestPath(targetId: string) {
-    if (!pathSource || !graphId) return
+    if (!pathSource) return
     setStatus(`Path ${pathSource} → ${targetId}…`)
     try {
-      setPathResult(await api.shortestPath(graphId, pathSource, targetId))
+      setPathResult(await api.shortestPath(pathSource, targetId))
       setStatus(null)
     } catch (err) {
       setStatus(`✗ ${(err as Error).message}`)
@@ -166,35 +150,18 @@ export function InvestigationGraphPage() {
       <div className="explorer-topbar">
         <div className="row" style={{ flex: '0 0 auto' }}>
           <strong>Investigation</strong>
-          <div style={{ width: 220 }}>
-            <GraphPicker
-              value={graphId}
-              onChange={setGraphId}
-              label=""
-              info="Choose which graph to search and explore."
-            />
-          </div>
         </div>
         <div className="explorer-topbar__search" style={{ position: 'relative' }}>
           <div className="row">
             <input
               className="input"
-              style={{ width: 110 }}
-              value={entityType}
-              onChange={(e) => setEntityType(e.target.value)}
-              title="Entity type (tag)"
-            />
-            <InfoTooltip text="What kind of thing to search for, e.g. person, company, or address." />
-            <input
-              className="input"
               style={{ flex: 1 }}
-              placeholder={graphId ? 'Search entities by name…' : 'Pick a graph first'}
-              disabled={!graphId}
+              placeholder="Search people, companies, and more…"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
             />
-            <button className="btn btn--primary" disabled={!graphId} onClick={handleSearch}>
+            <button className="btn btn--primary" onClick={handleSearch}>
               Search
             </button>
           </div>
@@ -207,7 +174,9 @@ export function InvestigationGraphPage() {
                   onClick={() => handleSelectResult(hit)}
                 >
                   <strong>{hit.label || hit.entity_id}</strong>
-                  <div className="mono muted">{hit.entity_id}</div>
+                  <div className="mono muted">
+                    {hit.entity_type} · {hit.entity_id}
+                  </div>
                 </button>
               ))}
             </div>
@@ -232,7 +201,6 @@ export function InvestigationGraphPage() {
         <div className="explorer-center">
           <GraphCanvas
             ref={canvasRef}
-            key={graphId}
             nodes={canvasNodes}
             edges={canvasEdges}
             selectedVid={selectedVid}
@@ -321,7 +289,7 @@ export function InvestigationGraphPage() {
             <div className="panel">
               <h3>Investigation tools</h3>
               <p className="text-secondary">
-                Pick a graph, search a person or company, then click a result to load its
+                Search a person, company, or anything else, then click a result to load its
                 connections onto the canvas — the "Depth" selector controls how many hops
                 out. People, companies, and organizations render larger; related details
                 like phone numbers or addresses render smaller. Click an expanded node

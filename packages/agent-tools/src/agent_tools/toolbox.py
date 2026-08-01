@@ -11,7 +11,7 @@ class GraphToolbox:
         self.ingestion_service = ingestion_service
 
     def search_person(self, query: str) -> ToolResult:
-        rows = self.graph_service.search_entities("person", query)
+        rows = self.graph_service.search_entities(query, entity_type="person")
         return ToolResult(ok=True, data={"results": rows}, message=f"found {len(rows)} people")
 
     def expand_node(self, entity_id: str, depth: int = 1) -> ToolResult:

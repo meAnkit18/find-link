@@ -22,21 +22,28 @@ class GraphService:
         result = self.client.execute_raw(query)
         return result.rows[0] if result.rows else None
 
-    def search_entities(self, entity_type: str, query_str: str) -> list[dict]:
+    def search_entities(self, query_str: str, entity_type: str | None = None) -> list[dict]:
         # Scan the whole tag: SearchIndex already does a full scan per tag,
         # and capping at 100 made this search silently miss entities,
         # disagreeing with the Explorer page's search results.
-        rows = self.client.traversal.scan_vertices(entity_type, limit=None)
+        tags = [entity_type] if entity_type else self.client.metadata.list_tags()
         lowered = query_str.lower()
-        return [
-            {
-                "entity_id": row.vid,
-                "label": row.tags.get(entity_type, {}).get("label", row.vid),
-                **row.tags.get(entity_type, {}),
-            }
-            for row in rows
-            if lowered in (row.tags.get(entity_type, {}).get("label", "") or "").lower()
-        ]
+        results: list[dict] = []
+        for tag in tags:
+            rows = self.client.traversal.scan_vertices(tag, limit=None)
+            for row in rows:
+                props = row.tags.get(tag, {})
+                label = props.get("label", row.vid)
+                if lowered in (label or "").lower():
+                    results.append(
+                        {
+                            "entity_id": row.vid,
+                            "entity_type": tag,
+                            "label": label,
+                            **props,
+                        }
+                    )
+        return results
 
     def expand_node(self, entity_id: str, depth: int = 1) -> dict:
         visited = set()

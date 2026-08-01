@@ -118,26 +118,17 @@ export const api = {
     ),
 
   // -- Entities ---------------------------------------------------------------
-  searchEntities: (graphId: string, q: string, entityType = 'person') =>
-    request<EntitySearchHit[]>(`/api/graphs/${graphId}/entities/search${qs({ q, entity_type: entityType })}`),
-  getEntity: (graphId: string, entityId: string) =>
-    request<Record<string, unknown>>(
-      `/api/graphs/${graphId}/entities/${encodeURIComponent(entityId)}`,
-    ),
-  expandEntityGraph: (graphId: string, entityId: string, depth = 1) =>
-    request<EntityGraph>(
-      `/api/graphs/${graphId}/entities/${encodeURIComponent(entityId)}/graph${qs({ depth })}`,
-    ),
-  getEntityRisk: (graphId: string, entityId: string) =>
-    request<RiskResult>(`/api/graphs/${graphId}/entities/${encodeURIComponent(entityId)}/risk`),
-  explainEntityRisk: (graphId: string, entityId: string) =>
-    request<RiskExplanation>(
-      `/api/graphs/${graphId}/entities/${encodeURIComponent(entityId)}/risk/explain`,
-    ),
-  shortestPath: (graphId: string, source: string, target: string, maxSteps = 5) =>
-    request<PathResult>(
-      `/api/graphs/${graphId}/entities/shortest-path${qs({ source, target, max_steps: maxSteps })}`,
-    ),
+  searchEntities: (q: string) => request<EntitySearchHit[]>(`/api/entities/search${qs({ q })}`),
+  getEntity: (entityId: string) =>
+    request<Record<string, unknown>>(`/api/entities/${encodeURIComponent(entityId)}`),
+  expandEntityGraph: (entityId: string, depth = 1) =>
+    request<EntityGraph>(`/api/entities/${encodeURIComponent(entityId)}/graph${qs({ depth })}`),
+  getEntityRisk: (entityId: string) =>
+    request<RiskResult>(`/api/entities/${encodeURIComponent(entityId)}/risk`),
+  explainEntityRisk: (entityId: string) =>
+    request<RiskExplanation>(`/api/entities/${encodeURIComponent(entityId)}/risk/explain`),
+  shortestPath: (source: string, target: string, maxSteps = 5) =>
+    request<PathResult>(`/api/entities/shortest-path${qs({ source, target, max_steps: maxSteps })}`),
 
   // -- Investigations / cases -------------------------------------------------
   // NOTE: these POST endpoints take *query parameters*, not a JSON body.

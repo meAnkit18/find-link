@@ -83,11 +83,13 @@ export interface Subgraph {
 export type Direction = 'out' | 'in' | 'both'
 
 // ---------------------------------------------------------------------------
-// Entities router (/api/graphs/{graph_id}/entities/*)
+// Entities router (/api/entities/*) — always the single backing intelligence
+// graph; there is no per-graph selection for these endpoints.
 // ---------------------------------------------------------------------------
 
 export interface EntitySearchHit {
   entity_id: string
+  entity_type: string
   label: string
   [key: string]: unknown
 }

@@ -2,35 +2,32 @@ import { useState } from 'react'
 import { useMutation } from '@tanstack/react-query'
 import { api } from '../api/client'
 import Field from '../components/common/Field'
-import GraphPicker from '../components/common/GraphPicker'
 import RunResult from '../components/common/RunResult'
 import InfoTooltip from '../components/common/InfoTooltip'
 
 /** Entities & risk workbench: entity search, fetch, graph expansion,
  * shortest path, risk scoring, and risk explanation — covers every
- * /api/graphs/{id}/entities/* endpoint plus /api/risk/*. */
+ * /api/entities/* endpoint plus /api/risk/*. Both always operate on the
+ * backend's single intelligence graph; there is no per-graph selection. */
 export default function EntitiesRiskPage() {
-  const [graphId, setGraphId] = useState('')
-
   // Entity search
-  const [entityType, setEntityType] = useState('person')
   const [searchQ, setSearchQ] = useState('')
   const searchEntities = useMutation({
-    mutationFn: () => api.searchEntities(graphId, searchQ, entityType.trim() || 'person'),
+    mutationFn: () => api.searchEntities(searchQ),
   })
 
   // Entity fetch / expand
   const [entityId, setEntityId] = useState('')
   const [depth, setDepth] = useState('1')
-  const getEntity = useMutation({ mutationFn: () => api.getEntity(graphId, entityId.trim()) })
+  const getEntity = useMutation({ mutationFn: () => api.getEntity(entityId.trim()) })
   const expandGraph = useMutation({
-    mutationFn: () => api.expandEntityGraph(graphId, entityId.trim(), Number(depth) || 1),
+    mutationFn: () => api.expandEntityGraph(entityId.trim(), Number(depth) || 1),
   })
 
   // Risk (per-entity, entities router)
-  const entityRisk = useMutation({ mutationFn: () => api.getEntityRisk(graphId, entityId.trim()) })
+  const entityRisk = useMutation({ mutationFn: () => api.getEntityRisk(entityId.trim()) })
   const entityRiskExplain = useMutation({
-    mutationFn: () => api.explainEntityRisk(graphId, entityId.trim()),
+    mutationFn: () => api.explainEntityRisk(entityId.trim()),
   })
 
   // Risk (default-graph /api/risk router)
@@ -43,10 +40,8 @@ export default function EntitiesRiskPage() {
   const [target, setTarget] = useState('')
   const [maxSteps, setMaxSteps] = useState('5')
   const shortestPath = useMutation({
-    mutationFn: () => api.shortestPath(graphId, source.trim(), target.trim(), Number(maxSteps) || 5),
+    mutationFn: () => api.shortestPath(source.trim(), target.trim(), Number(maxSteps) || 5),
   })
-
-  const needsGraph = !graphId
 
   return (
     <main className="page">
@@ -54,40 +49,25 @@ export default function EntitiesRiskPage() {
         <h2 className="page-title">Entities &amp; risk</h2>
         <p className="muted">
           Note: the entities/risk services are bound to the backend's default
-          space (<code className="mono">intelligence_graph</code>); the graph
-          picked below only satisfies the URL path.
+          space (<code className="mono">intelligence_graph</code>) — there is
+          no graph picker here because there's nothing to pick.
         </p>
-
-        <section className="card stack">
-          <GraphPicker
-            value={graphId}
-            onChange={setGraphId}
-            info="Only sets which graph the URL points to — see the note above."
-          />
-        </section>
 
         <section className="card stack">
           <h3>Search entities</h3>
           <div className="form-grid">
             <Field
-              label="Entity type (tag)"
-              value={entityType}
-              onChange={setEntityType}
-              placeholder="person"
-              info="What kind of thing to search for, e.g. person, company, or address."
-            />
-            <Field
               label="Query"
               value={searchQ}
               onChange={setSearchQ}
               placeholder="substring of label"
-              info="Part of the name to search for — doesn't need to be exact."
+              info="Part of the name to search for — doesn't need to be exact. Matches across every entity type at once."
             />
           </div>
           <div className="row">
             <button
               className="btn btn--primary"
-              disabled={needsGraph || searchEntities.isPending}
+              disabled={searchEntities.isPending}
               onClick={() => searchEntities.mutate()}
             >
               {searchEntities.isPending && <span className="spinner" />} Search
@@ -115,21 +95,21 @@ export default function EntitiesRiskPage() {
             />
           </div>
           <div className="row" style={{ flexWrap: 'wrap' }}>
-            <button className="btn" disabled={needsGraph || !entityId.trim()} onClick={() => getEntity.mutate()}>
+            <button className="btn" disabled={!entityId.trim()} onClick={() => getEntity.mutate()}>
               Get entity
             </button>
             <InfoTooltip text="Fetch this entity's stored details." />
-            <button className="btn" disabled={needsGraph || !entityId.trim()} onClick={() => expandGraph.mutate()}>
+            <button className="btn" disabled={!entityId.trim()} onClick={() => expandGraph.mutate()}>
               Expand graph
             </button>
             <InfoTooltip text="Fetch everyone and everything directly connected to this entity." />
-            <button className="btn" disabled={needsGraph || !entityId.trim()} onClick={() => entityRisk.mutate()}>
+            <button className="btn" disabled={!entityId.trim()} onClick={() => entityRisk.mutate()}>
               Calculate risk
             </button>
             <InfoTooltip text="Score how risky this entity is, based on its connections and known flags." />
             <button
               className="btn"
-              disabled={needsGraph || !entityId.trim()}
+              disabled={!entityId.trim()}
               onClick={() => entityRiskExplain.mutate()}
             >
               Explain risk
@@ -161,7 +141,7 @@ export default function EntitiesRiskPage() {
           <div className="row">
             <button
               className="btn btn--primary"
-              disabled={needsGraph || !source.trim() || !target.trim() || shortestPath.isPending}
+              disabled={!source.trim() || !target.trim() || shortestPath.isPending}
               onClick={() => shortestPath.mutate()}
             >
               {shortestPath.isPending && <span className="spinner" />} Find path
