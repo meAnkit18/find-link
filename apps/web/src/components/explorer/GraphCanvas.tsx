@@ -1,8 +1,9 @@
-import { useEffect, useImperativeHandle, useRef, forwardRef, useCallback } from 'react'
+import { useEffect, useImperativeHandle, useRef, useState, forwardRef, useCallback } from 'react'
 import cytoscape, { type Core, type ElementDefinition, type StylesheetStyle } from 'cytoscape'
 import fcose from 'cytoscape-fcose'
 import type { GraphEdge, GraphNode } from '../../api/types'
-import { colorForTag, edgeId, edgeLabel, roleForNode } from './graphStyle'
+import { EDGE_COLOR, SELECT_COLOR, colorForTag, edgeId, edgeLabel, roleForNode } from './graphStyle'
+import GraphPopup, { type GraphPopupInfo } from './GraphPopup'
 
 cytoscape.use(fcose)
 
@@ -12,16 +13,16 @@ const STYLE: StylesheetStyle[] = [
     style: {
       'background-color': (ele: cytoscape.NodeSingular) => colorForTag(ele.data('tag')),
       label: 'data(label)',
-      color: '#1a1d24',
+      color: '#cbd5e1',
       'font-size': 10,
       'text-valign': 'bottom',
       'text-margin-y': 6,
       width: 18,
       height: 18,
       'border-width': 1.5,
-      'border-color': '#ffffff',
+      'border-color': 'rgba(255, 255, 255, 0.35)',
       'text-outline-width': 2,
-      'text-outline-color': '#f6f7f9',
+      'text-outline-color': '#05070d',
     },
   },
   {
@@ -37,22 +38,38 @@ const STYLE: StylesheetStyle[] = [
     },
   },
   {
+    // Hub nodes carry a soft tag-colored halo (cytoscape's built-in overlay,
+    // standing in for kindred's SVG blur filter glow).
+    selector: 'node[role = "main"]',
+    style: {
+      'overlay-color': (ele) => colorForTag(ele.data('tag')),
+      'overlay-opacity': 0.18,
+      'overlay-padding': 8,
+    },
+  },
+  {
     selector: 'node:selected',
-    style: { 'border-color': '#2f6feb', 'border-width': 3 },
+    style: {
+      'border-color': SELECT_COLOR,
+      'border-width': 3,
+      'overlay-color': SELECT_COLOR,
+      'overlay-opacity': 0.3,
+      'overlay-padding': 10,
+    },
   },
   {
     selector: 'edge',
     style: {
       width: 1.5,
-      'line-color': '#c7ccd6',
-      'target-arrow-color': '#c7ccd6',
+      'line-color': 'rgba(148, 163, 184, 0.45)',
+      'target-arrow-color': 'rgba(148, 163, 184, 0.6)',
       'target-arrow-shape': 'triangle',
       'arrow-scale': 0.8,
       'curve-style': 'bezier',
       label: 'data(edgeType)',
       'font-size': 8,
-      color: '#667085',
-      'text-background-color': '#ffffff',
+      color: '#94a3b8',
+      'text-background-color': '#0a0e16',
       'text-background-opacity': 0,
       'text-background-padding': '2px',
       'text-opacity': 0,
@@ -64,6 +81,9 @@ const STYLE: StylesheetStyle[] = [
     // source of visual clutter on any graph with more than a few edges.
     selector: 'edge.edge-hover, edge.edge-highlight',
     style: {
+      'line-color': SELECT_COLOR,
+      'target-arrow-color': SELECT_COLOR,
+      width: 2,
       'text-opacity': 1,
       'text-background-opacity': 0.85,
     },
@@ -132,6 +152,30 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas(
   onSelectRef.current = onSelect
   onToggleExpandRef.current = onToggleExpand
 
+  const [popupInfo, setPopupInfo] = useState<GraphPopupInfo | null>(null)
+  const [pinned, setPinned] = useState(false)
+  const pinnedRef = useRef(pinned)
+  pinnedRef.current = pinned
+  const closePopup = () => {
+    setPinned(false)
+    setPopupInfo(null)
+  }
+
+  const nodePopupInfo = (ele: cytoscape.NodeSingular): GraphPopupInfo => ({
+    kind: 'node',
+    label: ele.data('label'),
+    tag: ele.data('tag'),
+    color: colorForTag(ele.data('tag')),
+    role: ele.data('role'),
+  })
+  const edgePopupInfo = (ele: cytoscape.EdgeSingular): GraphPopupInfo => ({
+    kind: 'edge',
+    label: ele.data('edgeType'),
+    source: ele.source().data('label') ?? ele.data('source'),
+    target: ele.target().data('label') ?? ele.data('target'),
+    color: EDGE_COLOR,
+  })
+
   useEffect(() => {
     if (!containerRef.current) return
     const cy = cytoscape({
@@ -148,20 +192,42 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas(
 
     // Single click both selects (opens the detail panel) and toggles
     // expand/collapse — approved interaction model, applies to any node.
+    // It also pins the hover popup, matching kindred's click-to-pin.
     cy.on('tap', 'node', (evt) => {
       const vid = evt.target.id()
       onSelectRef.current(vid)
       onToggleExpandRef.current(vid)
+      setPopupInfo(nodePopupInfo(evt.target))
+      setPinned(true)
+    })
+    cy.on('tap', 'edge', (evt) => {
+      setPopupInfo(edgePopupInfo(evt.target))
+      setPinned(true)
     })
     cy.on('tap', (evt) => {
-      if (evt.target === cy) onSelectRef.current(null)
+      if (evt.target === cy) {
+        onSelectRef.current(null)
+        closePopup()
+      }
     })
     // Keep the position cache fresh when the user drags nodes around.
     cy.on('dragfree', 'node', (evt) => {
       positionsRef.current.set(evt.target.id(), { ...evt.target.position() })
     })
-    cy.on('mouseover', 'edge', (evt) => evt.target.addClass('edge-hover'))
-    cy.on('mouseout', 'edge', (evt) => evt.target.removeClass('edge-hover'))
+    cy.on('mouseover', 'node', (evt) => {
+      if (!pinnedRef.current) setPopupInfo(nodePopupInfo(evt.target))
+    })
+    cy.on('mouseout', 'node', () => {
+      if (!pinnedRef.current) setPopupInfo(null)
+    })
+    cy.on('mouseover', 'edge', (evt) => {
+      evt.target.addClass('edge-hover')
+      if (!pinnedRef.current) setPopupInfo(edgePopupInfo(evt.target))
+    })
+    cy.on('mouseout', 'edge', (evt) => {
+      evt.target.removeClass('edge-hover')
+      if (!pinnedRef.current) setPopupInfo(null)
+    })
 
     // Cytoscape caches its container's size and offset. The container
     // changes size whenever the detail panel opens/closes, the filter panel
@@ -320,7 +386,12 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas(
     }
   }, [selectedVid])
 
-  return <div ref={containerRef} style={{ width: '100%', height: '100%' }} />
+  return (
+    <div style={{ position: 'relative', width: '100%', height: '100%', background: '#05070d' }}>
+      <div ref={containerRef} style={{ width: '100%', height: '100%' }} />
+      <GraphPopup info={popupInfo} pinned={pinned} onClose={closePopup} />
+    </div>
+  )
 })
 
 export default GraphCanvas

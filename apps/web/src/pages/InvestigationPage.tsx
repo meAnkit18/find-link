@@ -176,7 +176,7 @@ export function InvestigationGraphPage() {
   )
 
   return (
-    <main className="page page--flush explorer">
+    <main className="page page--flush explorer graph-dark">
       <div className="explorer-topbar">
         <div className="row" style={{ flex: '0 0 auto' }}>
           <strong>Investigation</strong>

@@ -1,3 +1,4 @@
+import { Boxes, Download, Maximize2, Minimize2, Network, RotateCw, Scan, Target, ZoomIn, ZoomOut } from 'lucide-react'
 import InfoTooltip from '../common/InfoTooltip'
 
 interface Props {
@@ -34,54 +35,54 @@ export default function GraphControls({
 }: Props) {
   return (
     <>
-      <div className="graph-controls" role="toolbar" aria-label="Graph controls">
-        <div className="row" style={{ justifyContent: 'center', margin: '2px 0' }}>
-          <InfoTooltip text="Zoom, fit, rearrange, save as an image, or view the graph full-screen. Hover any button to see what it does." />
-        </div>
-        <div className="graph-controls__divider" />
+      <div className="graph-controls pill-toolbar" role="toolbar" aria-label="Graph controls">
+        <InfoTooltip text="Zoom, fit, rearrange, save as an image, or view the graph full-screen. Hover any button to see what it does." />
         {onToggleView && (
           <>
+            <div className="pill-divider" />
             <button
-              className="graph-controls__btn graph-controls__btn--label"
-              title={view === '2d' ? 'Switch to 3D view' : 'Switch to 2D view'}
-              onClick={onToggleView}
+              className={`pill-btn${view === '3d' ? ' pill-btn--active' : ''}`}
+              title="Switch to 3D view"
+              onClick={() => view !== '3d' && onToggleView()}
             >
-              {view === '2d' ? '3D' : '2D'}
+              <Boxes size={14} /> 3D
             </button>
-            <div className="graph-controls__divider" />
+            <button
+              className={`pill-btn${view === '2d' ? ' pill-btn--active' : ''}`}
+              title="Switch to 2D view"
+              onClick={() => view !== '2d' && onToggleView()}
+            >
+              <Network size={14} /> 2D
+            </button>
           </>
         )}
-        <button className="graph-controls__btn" title="Zoom in (+)" onClick={onZoomIn}>
-          {'\u002B'}
+        <div className="pill-divider" />
+        <button className="pill-btn" title="Zoom in (+)" onClick={onZoomIn}>
+          <ZoomIn size={14} />
         </button>
-        <button className="graph-controls__btn" title="Zoom out (\u2212)" onClick={onZoomOut}>
-          {'\u2212'}
+        <button className="pill-btn" title="Zoom out (−)" onClick={onZoomOut}>
+          <ZoomOut size={14} />
         </button>
-        <div className="graph-controls__divider" />
-        <button className="graph-controls__btn" title="Fit graph to view (0)" onClick={onFit}>
-          {'\u26F6'}
+        <div className="pill-divider" />
+        <button className="pill-btn" title="Fit graph to view (0)" onClick={onFit}>
+          <Scan size={14} />
         </button>
-        <button
-          className="graph-controls__btn"
-          title="Center on selected node"
-          onClick={onCenterSelected}
-          disabled={!hasSelection}
-        >
-          {'\u25CE'}
+        <button className="pill-btn" title="Center on selected node" onClick={onCenterSelected} disabled={!hasSelection}>
+          <Target size={14} />
         </button>
-        <button className="graph-controls__btn" title="Re-run layout" onClick={onRelayout}>
-          {'\u21BB'}
+        <button className="pill-btn" title="Re-run layout" onClick={onRelayout}>
+          <RotateCw size={14} />
         </button>
-        <div className="graph-controls__divider" />
-        <button className="graph-controls__btn" title="Export as PNG" onClick={onExportPng}>
-          {'\u2B07'}
+        <div className="pill-divider" />
+        <button className="pill-btn" title="Export as PNG" onClick={onExportPng}>
+          <Download size={14} />
         </button>
         <button
-          className="graph-controls__btn"
+          className="pill-btn"
           title={isFullscreen ? 'Exit fullscreen (f)' : 'Fullscreen (f)'}
           onClick={onToggleFullscreen}
         >
-          {isFullscreen ? '\u2715' : '\u26F6'}
+          {isFullscreen ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
         </button>
       </div>
 

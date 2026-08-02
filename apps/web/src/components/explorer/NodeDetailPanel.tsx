@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { api } from '../../api/client'
 import InfoTooltip from '../common/InfoTooltip'
+import { colorForTag } from './graphStyle'
 
 interface Props {
   graphId: string
@@ -44,7 +45,14 @@ export default function NodeDetailPanel({
         <>
           <div>
             <div style={{ fontSize: '1.2em', fontWeight: 600 }}>{node.label}</div>
-            <div className="muted">{node.tags.join(', ')}</div>
+            <div className="row" style={{ flexWrap: 'wrap', gap: 'var(--space-1)', marginTop: 4 }}>
+              {node.tags.map((tag) => (
+                <span key={tag} className="tag-chip">
+                  <span className="tag-dot" style={{ background: colorForTag(tag) }} />
+                  {tag}
+                </span>
+              ))}
+            </div>
           </div>
 
           <div className="row">

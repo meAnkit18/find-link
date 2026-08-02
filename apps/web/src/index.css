@@ -1,4 +1,5 @@
 @import './styles/tokens.css';
+@import './styles/graph-dark.css';
 
 * {
   box-sizing: border-box;
@@ -748,57 +749,14 @@ textarea.input {
 
 /* Graph exploration controls (zoom / fit / layout / fullscreen toolbar). */
 
+/* Layout only — colors/shape (rounded-full, glass) come from the
+   `.pill-toolbar` / `.pill-btn` / `.pill-divider` classes in graph-dark.css,
+   applied alongside these on the same elements. */
 .graph-controls {
   position: absolute;
   top: var(--space-3);
   right: var(--space-3);
   z-index: 10;
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
-  padding: var(--space-1);
-  background: var(--color-surface-raised);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  box-shadow: var(--shadow-float);
-}
-
-.graph-controls__btn {
-  width: 30px;
-  height: 30px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 15px;
-  line-height: 1;
-  color: var(--color-text);
-  background: transparent;
-  border: none;
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-}
-
-.graph-controls__btn:hover:not(:disabled) {
-  background: var(--color-surface-muted);
-  color: var(--color-primary);
-}
-
-.graph-controls__btn:disabled {
-  opacity: 0.35;
-  cursor: default;
-}
-
-.graph-controls__btn--label {
-  width: auto;
-  padding: 0 var(--space-2);
-  font-size: 11px;
-  font-weight: 600;
-}
-
-.graph-controls__divider {
-  height: 1px;
-  margin: var(--space-1) var(--space-1);
-  background: var(--color-border);
 }
 
 .graph-zoom-indicator {

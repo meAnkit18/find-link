@@ -1,13 +1,20 @@
 import type { GraphEdge, GraphNode } from '../../api/types'
 
+// Dark-bg-legible hues (kindred-main's node color language) — hashed onto
+// tags below, so any schema's tag set gets a consistent, readable color.
 export const TAG_PALETTE = [
-  '#2f6feb',
-  '#b5720a',
-  '#1e8a5f',
-  '#a340c9',
-  '#c23b32',
-  '#0f9bab',
+  '#818cf8',
+  '#fbbf24',
+  '#34d399',
+  '#f472b6',
+  '#f87171',
+  '#38bdf8',
 ]
+
+// Shared accent colors for edges and the selected/hover highlight, used by
+// both the 2D (cytoscape) and 3D (Three.js) canvases and the popup card.
+export const EDGE_COLOR = '#94a3b8'
+export const SELECT_COLOR = '#38bdf8'
 
 export function colorForTag(tag: string): string {
   let hash = 0

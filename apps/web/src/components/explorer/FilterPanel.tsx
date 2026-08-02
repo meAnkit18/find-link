@@ -1,5 +1,6 @@
 import type { SchemaInfo } from '../../api/types'
 import InfoTooltip from '../common/InfoTooltip'
+import { colorForTag } from './graphStyle'
 
 interface Props {
   schema: SchemaInfo
@@ -36,6 +37,7 @@ export default function FilterPanel({
                   checked={!hiddenTags.has(tag)}
                   onChange={() => onToggleTag(tag)}
                 />
+                <span className="tag-dot" style={{ background: colorForTag(tag) }} />
                 {tag}
               </label>
               <button

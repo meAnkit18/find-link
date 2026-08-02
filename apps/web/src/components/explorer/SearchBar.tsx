@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query'
 import { api } from '../../api/client'
 import type { SearchResult } from '../../api/types'
 import InfoTooltip from '../common/InfoTooltip'
+import { colorForTag } from './graphStyle'
 
 interface Props {
   graphId: string
@@ -71,7 +72,10 @@ export default function SearchBar({ graphId, onResultClick }: Props) {
               }}
             >
               <strong>{result.label}</strong>{' '}
-              <span className="muted">({result.tag})</span>
+              <span className="tag-chip" style={{ marginLeft: 4 }}>
+                <span className="tag-dot" style={{ background: colorForTag(result.tag) }} />
+                {result.tag}
+              </span>
             </button>
           ))}
         </div>

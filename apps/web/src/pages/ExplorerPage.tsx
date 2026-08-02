@@ -133,7 +133,7 @@ export default function ExplorerPage() {
   }
 
   return (
-    <main className="page page--flush explorer">
+    <main className="page page--flush explorer graph-dark">
       <div className="explorer-topbar">
         <div className="row">
           <Link to="/">← All graphs</Link>
