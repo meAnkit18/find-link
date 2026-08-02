@@ -140,6 +140,16 @@ const GraphCanvas3D = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas3
     return { nodes: graphNodes, links: graphLinks }
   }, [nodes, edges, mainTags])
 
+  // Same tag breakdown as the 2D canvas's bottom legend bar.
+  const legend = useMemo(() => {
+    const counts = new Map<string, number>()
+    for (const n of nodes) {
+      const tag = n.tags[0] ?? 'entity'
+      counts.set(tag, (counts.get(tag) ?? 0) + 1)
+    }
+    return [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8)
+  }, [nodes])
+
   // fresh sprite registries whenever the dataset changes
   useEffect(() => {
     nodeSprites.current.clear()
@@ -303,8 +313,9 @@ const GraphCanvas3D = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas3
   }
 
   return (
-    <div ref={wrapRef} style={{ position: 'relative', width: '100%', height: '100%', background: '#05070d' }}>
-      <ForceGraph3D<Node3D, Link3D>
+    <div style={{ display: 'flex', flexDirection: 'column', width: '100%', height: '100%' }}>
+      <div ref={wrapRef} style={{ position: 'relative', flex: 1, minHeight: 0, background: '#05070d' }}>
+        <ForceGraph3D<Node3D, Link3D>
         ref={fgRef}
         graphData={graphData}
         backgroundColor="#05070d"
@@ -361,6 +372,19 @@ const GraphCanvas3D = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas3
       </button>
       <div className="graph-3d-hint">drag to orbit · scroll to zoom</div>
       <GraphPopup info={popupInfo} pinned={pinned} onClose={closePopup} />
+    </div>
+      <div className="graph-legend">
+        {legend.map(([tag, count]) => (
+          <span key={tag} className="graph-legend__item">
+            <span className="graph-legend__dot" style={{ background: colorForTag(tag) }} />
+            {tag} ({count})
+          </span>
+        ))}
+        <span className="graph-legend__spacer" />
+        <span>
+          {nodes.length} node{nodes.length === 1 ? '' : 's'} · {edges.length} link{edges.length === 1 ? '' : 's'}
+        </span>
+      </div>
     </div>
   )
 })

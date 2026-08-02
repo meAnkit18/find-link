@@ -78,6 +78,18 @@
   -webkit-backdrop-filter: blur(14px);
 }
 
+/* `backdrop-filter` makes each of these establish its own stacking context.
+   Without an explicit z-index, that traps the topbar's search-dropdown
+   (z-index: 40, but now scoped *inside* the topbar's context) below
+   `.explorer-center`/`.explorer-canvas` — both `position: relative` with an
+   implicit z-index of 0 — which, being later in the DOM, would otherwise
+   paint on top and visually swallow the dropdown. An explicit z-index here
+   settles that root-level comparison in the topbar's favor. */
+.graph-dark .explorer-topbar {
+  position: relative;
+  z-index: 5;
+}
+
 .graph-dark .input,
 .graph-dark .select {
   border-color: var(--color-border);
@@ -274,4 +286,38 @@
   font-size: 11px;
   color: var(--color-text-muted);
   pointer-events: none;
+}
+
+/* ── Bottom legend bar — kindred's persistent tag/count strip under the
+   graph canvas (graph-view.tsx / graph-3d.tsx) ── */
+
+.graph-dark .graph-legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 16px;
+  border-top: 1px solid var(--color-border);
+  background: rgba(15, 20, 30, 0.9);
+  font-size: 11px;
+  color: var(--color-text-muted);
+  flex-shrink: 0;
+}
+
+.graph-dark .graph-legend__item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+}
+
+.graph-dark .graph-legend__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.graph-dark .graph-legend__spacer {
+  flex: 1;
 }

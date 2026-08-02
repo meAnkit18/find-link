@@ -1,4 +1,4 @@
-import { useEffect, useImperativeHandle, useRef, useState, forwardRef, useCallback } from 'react'
+import { useEffect, useImperativeHandle, useMemo, useRef, useState, forwardRef, useCallback } from 'react'
 import cytoscape, { type Core, type ElementDefinition, type StylesheetStyle } from 'cytoscape'
 import fcose from 'cytoscape-fcose'
 import type { GraphEdge, GraphNode } from '../../api/types'
@@ -6,6 +6,10 @@ import { EDGE_COLOR, SELECT_COLOR, colorForTag, edgeId, edgeLabel, roleForNode }
 import GraphPopup, { type GraphPopupInfo } from './GraphPopup'
 
 cytoscape.use(fcose)
+
+// Same gradient stops as kindred-main's SVG `bgGlow` radial gradient, ported
+// to a plain CSS background since cytoscape's canvas itself stays transparent.
+const CANVAS_BG = 'radial-gradient(65% 65% at 50% 45%, #0b1220 0%, #020617 100%)'
 
 const STYLE: StylesheetStyle[] = [
   {
@@ -43,8 +47,8 @@ const STYLE: StylesheetStyle[] = [
     selector: 'node[role = "main"]',
     style: {
       'overlay-color': (ele) => colorForTag(ele.data('tag')),
-      'overlay-opacity': 0.18,
-      'overlay-padding': 8,
+      'overlay-opacity': 0.22,
+      'overlay-padding': 10,
     },
   },
   {
@@ -53,8 +57,8 @@ const STYLE: StylesheetStyle[] = [
       'border-color': SELECT_COLOR,
       'border-width': 3,
       'overlay-color': SELECT_COLOR,
-      'overlay-opacity': 0.3,
-      'overlay-padding': 10,
+      'overlay-opacity': 0.38,
+      'overlay-padding': 12,
     },
   },
   {
@@ -398,10 +402,36 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas(
     }
   }, [selectedVid])
 
+  // Tag breakdown for the bottom legend bar, mirroring kindred's persistent
+  // node-kind legend (there it's a fixed 4-kind list; here tags are
+  // schema-driven, so this is the top tags actually present, by count).
+  const legend = useMemo(() => {
+    const counts = new Map<string, number>()
+    for (const n of nodes) {
+      const tag = n.tags[0] ?? 'entity'
+      counts.set(tag, (counts.get(tag) ?? 0) + 1)
+    }
+    return [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8)
+  }, [nodes])
+
   return (
-    <div style={{ position: 'relative', width: '100%', height: '100%', background: '#05070d' }}>
-      <div ref={containerRef} style={{ width: '100%', height: '100%' }} />
-      <GraphPopup info={popupInfo} pinned={pinned} onClose={closePopup} />
+    <div style={{ display: 'flex', flexDirection: 'column', width: '100%', height: '100%' }}>
+      <div style={{ position: 'relative', flex: 1, minHeight: 0, background: CANVAS_BG }}>
+        <div ref={containerRef} style={{ width: '100%', height: '100%' }} />
+        <GraphPopup info={popupInfo} pinned={pinned} onClose={closePopup} />
+      </div>
+      <div className="graph-legend">
+        {legend.map(([tag, count]) => (
+          <span key={tag} className="graph-legend__item">
+            <span className="graph-legend__dot" style={{ background: colorForTag(tag) }} />
+            {tag} ({count})
+          </span>
+        ))}
+        <span className="graph-legend__spacer" />
+        <span>
+          {nodes.length} node{nodes.length === 1 ? '' : 's'} · {edges.length} link{edges.length === 1 ? '' : 's'}
+        </span>
+      </div>
     </div>
   )
 })
