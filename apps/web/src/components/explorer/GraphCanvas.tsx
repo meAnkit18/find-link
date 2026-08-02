@@ -104,14 +104,26 @@ function ensureGraphVisible(cy: Core) {
  * effect) and the manual "re-run layout" control — kept in one place so the
  * two call sites can't drift out of sync. Wider spacing than fcose's
  * defaults so nodes don't visually overlap once there are more than a
- * handful on screen. */
-const FCOSE_LAYOUT_BASE = {
-  name: 'fcose',
-  animate: false,
-  quality: 'draft',
-  fit: false,
-  nodeRepulsion: 12000,
-  idealEdgeLength: 130,
+ * handful on screen.
+ *
+ * quality must track randomize: fcose only supports `randomize: false` with
+ * quality "default"/"proof" (see its own README and the console warning it
+ * logs for this exact combination) — pairing "draft" quality with
+ * `randomize: false` makes it throw inside relocateComponent(), because
+ * spectralResult is never populated when randomize is off. "draft" is fine,
+ * and fast, for the initial full-graph layout (randomize: true); incremental
+ * layouts that keep already-placed nodes fixed (every reveal/expand click
+ * after the first render) need "default" instead. */
+function fcoseLayoutOptions(randomize: boolean) {
+  return {
+    name: 'fcose',
+    animate: false,
+    quality: randomize ? 'draft' : 'default',
+    fit: false,
+    nodeRepulsion: 12000,
+    idealEdgeLength: 130,
+    randomize,
+  }
 }
 
 export interface GraphCanvasHandle {
@@ -275,7 +287,7 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas(
         if (!cy) return
         // fcose's options (animate/randomize/nodeRepulsion/...) aren't part of
         // @types/cytoscape's built-in layout typings, hence the cast.
-        cy.layout({ ...FCOSE_LAYOUT_BASE, randomize: false } as unknown as cytoscape.LayoutOptions).run()
+        cy.layout(fcoseLayoutOptions(false) as unknown as cytoscape.LayoutOptions).run()
       },
       exportPng: () => {
         const cy = cyRef.current
@@ -359,7 +371,7 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas(
       // fcose's options (animate/randomize/nodeRepulsion/...) aren't part of
       // @types/cytoscape's built-in layout typings, hence the cast.
       const layout = cy.layout(
-        { ...FCOSE_LAYOUT_BASE, randomize: !hadNodesBefore } as unknown as cytoscape.LayoutOptions,
+        fcoseLayoutOptions(!hadNodesBefore) as unknown as cytoscape.LayoutOptions,
       )
       layout.one('layoutstop', () => {
         // Cache the settled positions of everything, then make sure the
