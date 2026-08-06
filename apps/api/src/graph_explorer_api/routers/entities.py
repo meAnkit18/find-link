@@ -25,6 +25,19 @@ def search_entities(
     return graph_service.search_entities(q, entity_type=entity_type)
 
 
+# Declared before "/{entity_id}": FastAPI matches in declaration order, so
+# a literal path that could also read as an entity id has to come first or
+# it is never reached.
+@router.get("/shortest-path")
+def shortest_path(
+    source: str = Query(...),
+    target: str = Query(...),
+    max_steps: int = Query(5, ge=1, le=10),
+    graph_service: GraphService = Depends(get_graph_service),
+):
+    return graph_service.shortest_path(source, target, max_steps=max_steps)
+
+
 @router.get("/{entity_id}")
 def get_entity(
     entity_id: str,
@@ -109,13 +122,3 @@ def explain_entity_risk(
     risk = risk_service.calculate_for_entity(entity_id)
     explanation_service = InvestigationExplanationService()
     return explanation_service.explain_risk(risk)
-
-
-@router.get("/shortest-path")
-def shortest_path(
-    source: str = Query(...),
-    target: str = Query(...),
-    max_steps: int = Query(5, ge=1, le=10),
-    graph_service: GraphService = Depends(get_graph_service),
-):
-    return graph_service.shortest_path(source, target, max_steps=max_steps)

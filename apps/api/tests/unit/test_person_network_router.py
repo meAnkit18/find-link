@@ -81,3 +81,29 @@ def test_endpoints_503_when_the_intelligence_graph_is_unavailable():
     # so app.state.person_network_service stays None.
     with TestClient(create_app()) as unwired:
         assert unwired.get("/api/entities/a/person-network").status_code == 503
+
+
+def test_shortest_path_is_not_shadowed_by_the_entity_id_route(service):
+    """`/shortest-path` reads as an entity id, so declared after
+    `/{entity_id}` it resolves to get_entity and never runs."""
+    from graph_explorer_api.dependencies import get_graph_service
+
+    reached = []
+
+    class SpyGraphService:
+        def shortest_path(self, source, target, max_steps=5):
+            reached.append((source, target))
+            return {"paths": []}
+
+        def get_entity(self, entity_id):
+            return {"vid": entity_id}
+
+    app = create_app()
+    app.dependency_overrides[get_graph_service] = SpyGraphService
+    with TestClient(app) as client:
+        response = client.get(
+            "/api/entities/shortest-path", params={"source": "a", "target": "b"}
+        )
+
+    assert response.status_code == 200
+    assert reached == [("a", "b")]
