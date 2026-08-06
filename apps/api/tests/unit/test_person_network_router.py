@@ -77,9 +77,15 @@ def test_attributes_endpoint_returns_shared_details(api):
 
 
 def test_endpoints_503_when_the_intelligence_graph_is_unavailable():
-    # No dependency override: the lifespan can't reach NebulaGraph in tests,
-    # so app.state.person_network_service stays None.
-    with TestClient(create_app()) as unwired:
+    """Startup couldn't reach NebulaGraph, so the service was never built.
+
+    The unavailability is forced rather than assumed: relying on the
+    lifespan failing makes this pass only on machines with no NebulaGraph
+    running, and fail on any machine that has one.
+    """
+    app = create_app()
+    with TestClient(app) as unwired:
+        app.state.person_network_service = None
         assert unwired.get("/api/entities/a/person-network").status_code == 503
 
 

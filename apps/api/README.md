@@ -47,6 +47,16 @@ over raw hops.
 - `GET /api/entities/{id}/attributes` — one person's own attribute
   vertices, each with `shared_with` (the other people holding it).
 
+Two people are connected when they share a vertex (same phone / email /
+passport / account / address / employer), when a direct person-to-person
+edge joins them, **or** when their two *different* organisations are
+themselves related — `person -> org -[PAYS|OWNS|...]- org <- person`. That
+last rule is the money-flow pattern: on the shipped `intel_kg_v2` data,
+Priya works at Meridian, Arjun at Nimbus, and Nimbus pays Meridian. They
+share nothing at all, and without the bridge the whole network is empty.
+Only organisation-like connectors bridge (`BRIDGE_TAGS`); widening that to
+`bank_account` is a one-line change but multiplies the pairs a level emits.
+
 Two things to know before changing it:
 
 - **Fan-out is the failure mode.** A phone shared by 400 people would emit

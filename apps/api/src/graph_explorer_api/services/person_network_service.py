@@ -15,9 +15,10 @@ breadth-first search over that projection, not over raw hops.
 from __future__ import annotations
 
 from collections import defaultdict
+from typing import Callable, NamedTuple
 
 from graph_core.client import GraphClient
-from graph_core.storage.result import RawVertex
+from graph_core.storage.result import RawEdge, RawVertex
 from graph_explorer_api.graph_clients import GraphClientCache
 
 PERSON_TAG = "person"
@@ -48,11 +49,37 @@ SHARED_EDGES: tuple[str, ...] = (
 # Available on request via the `connectors` parameter, never on by default.
 WEAK_EDGES: tuple[str, ...] = ("CITIZEN_OF",)
 
+# person -> org -[one of these]- org <- person. Two people at *different*
+# companies are connected when the companies themselves are (a payment, an
+# ownership stake, ...) — the money-flow pattern, and the one thing a plain
+# shared-attribute rule cannot see. The link is reported with the direction
+# it is stored in, so "Nimbus pays Meridian" doesn't read backwards.
+BRIDGE_EDGES: tuple[str, ...] = (
+    "PAYS",
+    "OWNS",
+    "RELATED_TO",
+    "TRANSFERRED_TO",
+    "SHAREHOLDER_OF",
+    "DIRECTOR_OF",
+)
+
+# Only these connector kinds may be bridged. Widening this (bank_account is
+# the obvious next one — account-to-account transfers are the same pattern)
+# is a one-line change, but every addition multiplies the pairs a single
+# level can emit, so it wants a fan-out check alongside.
+BRIDGE_TAGS: tuple[str, ...] = ("company", "organization")
+
 DEFAULT_MAX_FANOUT = 25
 DEFAULT_MAX_PERSONS = 300
 MAX_DEGREE = 3
 
 _FETCH_CHUNK = 200
+
+
+class Connectors(NamedTuple):
+    direct: tuple[str, ...]
+    shared: tuple[str, ...]
+    bridge: tuple[str, ...]
 
 
 class PersonNetworkService:
@@ -82,7 +109,7 @@ class PersonNetworkService:
         router turns that into a 404.
         """
         degree = max(1, min(int(degree), MAX_DEGREE))
-        direct_edges, shared_edges = self._resolve_connectors(connectors)
+        edges = self._resolve_connectors(connectors)
 
         root = self._fetch_vertices([root_id]).get(root_id)
         if root is None or PERSON_TAG not in root.tags:
@@ -97,9 +124,7 @@ class PersonNetworkService:
         for level in range(1, degree + 1):
             if not frontier:
                 break
-            found = self._expand_level(
-                frontier, set(persons), direct_edges, shared_edges, max_fanout
-            )
+            found = self._expand_level(frontier, set(persons), edges, max_fanout)
             suppressed.update(found.suppressed_hubs)
             for key, via in found.links.items():
                 link = links.get(key)
@@ -141,14 +166,18 @@ class PersonNetworkService:
             "suppressed_hubs": sorted(
                 suppressed.values(), key=lambda hub: -hub["person_count"]
             ),
-            "connectors": {"direct": list(direct_edges), "shared": list(shared_edges)},
+            "connectors": {
+                "direct": list(edges.direct),
+                "shared": list(edges.shared),
+                "bridge": list(edges.bridge),
+            },
         }
 
     def attributes(self, entity_id: str, connectors: list[str] | None = None) -> dict:
         """One person's own attribute vertices (phone, email, address, ...),
         each annotated with the other people who share it — that's what makes
         an expanded attribute readable as the reason for a link."""
-        _direct, shared_edges = self._resolve_connectors(connectors)
+        shared_edges = self._resolve_connectors(connectors).shared
         if not shared_edges:
             return {"entity_id": entity_id, "attributes": []}
 
@@ -186,17 +215,15 @@ class PersonNetworkService:
 
     # ----------------------------------------------------------- internals
 
-    def _resolve_connectors(
-        self, connectors: list[str] | None
-    ) -> tuple[tuple[str, ...], tuple[str, ...]]:
-        """Split the requested edge types into direct/shared, keeping only
-        those the space actually has.
+    def _resolve_connectors(self, connectors: list[str] | None) -> Connectors:
+        """Split the requested edge types into direct/shared/bridge, keeping
+        only those the space actually has.
 
         A space built from a partial import won't have every edge type, and
         `GO ... OVER <unknown>` is a hard nGQL error, not an empty result.
         """
         if connectors is None:
-            requested = set(DIRECT_EDGES) | set(SHARED_EDGES)
+            requested = set(DIRECT_EDGES) | set(SHARED_EDGES) | set(BRIDGE_EDGES)
         else:
             requested = {c.strip().upper() for c in connectors if c.strip()}
 
@@ -206,21 +233,22 @@ class PersonNetworkService:
             available = requested  # can't introspect — let the query decide
 
         usable = requested & available
-        return (
-            tuple(e for e in DIRECT_EDGES if e in usable),
-            tuple(e for e in SHARED_EDGES + WEAK_EDGES if e in usable),
+        return Connectors(
+            direct=tuple(e for e in DIRECT_EDGES if e in usable),
+            shared=tuple(e for e in SHARED_EDGES + WEAK_EDGES if e in usable),
+            bridge=tuple(e for e in BRIDGE_EDGES if e in usable),
         )
 
     def _expand_level(
         self,
         frontier: list[str],
         known_person_ids: set[str],
-        direct_edges: tuple[str, ...],
-        shared_edges: tuple[str, ...],
+        edges: Connectors,
         max_fanout: int,
     ) -> _LevelResult:
         traversal = self.client.traversal
         frontier_set = set(frontier)
+        direct_edges, shared_edges = edges.direct, edges.shared
 
         direct_raw = (
             traversal.neighbors_batch(frontier, list(direct_edges), "both")
@@ -329,7 +357,94 @@ class PersonNetworkService:
                 if member not in frontier_set and member in vertices:
                     result.persons[member] = vertices[member]
 
+        self._add_bridged_links(
+            result, connector_ids, vertices, owners, edges, max_fanout, frontier_set, is_person
+        )
         return result
+
+    def _add_bridged_links(
+        self,
+        result: _LevelResult,
+        connector_ids: list[str],
+        vertices: dict[str, RawVertex],
+        owners: dict[str, set[str]],
+        edges: Connectors,
+        max_fanout: int,
+        frontier_set: set[str],
+        is_person: Callable[[str], bool],
+    ) -> None:
+        """Connect people whose *different* organisations are related.
+
+        Priya works at Meridian, Arjun at Nimbus, and Nimbus pays Meridian:
+        they share nothing, yet they are plainly connected. A shared-vertex
+        rule cannot see that, because the two connectors are different
+        vertices — this walks the one extra hop between them.
+        """
+        if not edges.bridge or not edges.shared:
+            return
+
+        near = [
+            vid
+            for vid in connector_ids
+            if _primary_tag(vertices[vid]) in BRIDGE_TAGS and owners.get(vid)
+        ]
+        if not near:
+            return
+
+        traversal = self.client.traversal
+        bridge_raw = traversal.neighbors_batch(near, list(edges.bridge), "both")
+        near_set = set(near)
+
+        far_ids = sorted(_endpoints(bridge_raw) - near_set)
+        vertices.update(self._fetch_vertices([v for v in far_ids if v not in vertices]))
+        far_set = {
+            vid
+            for vid in far_ids
+            if vid in vertices and _primary_tag(vertices[vid]) in BRIDGE_TAGS
+        }
+        if not far_set:
+            return
+
+        far_owner_edges = traversal.neighbors_batch(sorted(far_set), list(edges.shared), "both")
+        vertices.update(
+            self._fetch_vertices(
+                [v for v in sorted(_endpoints(far_owner_edges)) if v not in vertices]
+            )
+        )
+        far_owners: dict[str, set[str]] = defaultdict(set)
+        for edge in far_owner_edges:
+            for org, person in ((edge.src, edge.dst), (edge.dst, edge.src)):
+                if org in far_set and is_person(person):
+                    far_owners[org].add(person)
+
+        for edge in bridge_raw:
+            for this, other in ((edge.src, edge.dst), (edge.dst, edge.src)):
+                if this not in near_set or other not in far_set:
+                    continue
+                here, there = owners.get(this, set()), far_owners.get(other, set())
+                if not here or not there:
+                    continue
+                if len(here) > max_fanout or len(there) > max_fanout:
+                    continue  # a hub org would pair everyone with everyone
+                via = {
+                    "kind": "linked_organisation",
+                    "connector_id": this,
+                    "connector_tag": _primary_tag(vertices[this]),
+                    "connector_label": _label_of(vertices[this], this),
+                    "linked_id": other,
+                    "linked_tag": _primary_tag(vertices[other]),
+                    "linked_label": _label_of(vertices[other], other),
+                    "edge_types": [edge.edge_type],
+                    "label": _bridge_label(edge, vertices),
+                }
+                for person in here:
+                    for far_person in there:
+                        if person == far_person:
+                            continue
+                        result.links[_pair(person, far_person)].append(dict(via))
+                        for end in (person, far_person):
+                            if end not in frontier_set and end in vertices:
+                                result.persons[end] = vertices[end]
 
     def _owners(self, connector_ids: list[str], shared_edges: list[str]) -> dict[str, set[str]]:
         """connector vid -> the person vids attached to it."""
@@ -416,6 +531,16 @@ def _humanize(edge_type: str) -> str:
     return edge_type.replace("_", " ").lower()
 
 
+def _bridge_label(edge: RawEdge, vertices: dict[str, RawVertex]) -> str:
+    """Read the bridge in the direction it is stored, so "Nimbus pays
+    Meridian" doesn't come out backwards."""
+    src = vertices.get(edge.src)
+    dst = vertices.get(edge.dst)
+    src_label = _label_of(src, edge.src) if src else edge.src
+    dst_label = _label_of(dst, edge.dst) if dst else edge.dst
+    return f"{src_label} {_humanize(edge.edge_type)} {dst_label}"
+
+
 def _merge_via(existing: list[dict], incoming: list[dict]) -> None:
     """Same pair rediscovered at a later level — keep every distinct reason."""
     seen = {_via_key(v) for v in existing}
@@ -427,18 +552,25 @@ def _merge_via(existing: list[dict], incoming: list[dict]) -> None:
 
 
 def _via_key(via: dict) -> tuple:
-    return (via.get("kind"), via.get("connector_id"), tuple(via.get("edge_types", [])))
+    """Identity of a reason, independent of which end it was found from.
+
+    A bridge discovered walking Priya->Meridian->Nimbus->Arjun and the same
+    bridge rediscovered next level as Arjun->Nimbus->Meridian->Priya are one
+    reason, not two, so the pair of connectors is sorted rather than ordered.
+    """
+    connectors = tuple(sorted(c for c in (via.get("connector_id"), via.get("linked_id")) if c))
+    return (via.get("kind"), connectors, tuple(via.get("edge_types", [])))
 
 
 def _finalize_link(link: dict) -> dict:
     via = link["via"]
     if len(via) == 1:
         entry = via[0]
-        label = (
-            entry["label"]
-            if entry["kind"] == "direct"
-            else f"shared {_humanize(entry['connector_tag'])}"
-        )
+        if entry["kind"] == "shared_attribute":
+            label = f"shared {_humanize(entry['connector_tag'])}"
+        else:
+            # direct and linked_organisation both carry a ready sentence
+            label = entry["label"]
     else:
-        label = f"{len(via)} shared details"
+        label = f"{len(via)} connections"
     return {**link, "label": label}

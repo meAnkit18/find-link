@@ -129,6 +129,20 @@ export type PersonLinkVia =
       connector_label: string
       edge_types: string[]
     }
+  /** Two people at *different* organisations that are themselves related —
+   * "Nimbus Trade pays Meridian Exports". They share nothing; the link is
+   * the relationship between their employers. */
+  | {
+      kind: 'linked_organisation'
+      connector_id: string
+      connector_tag: string
+      connector_label: string
+      linked_id: string
+      linked_tag: string
+      linked_label: string
+      edge_types: string[]
+      label: string
+    }
 
 export interface PersonLink {
   source: string

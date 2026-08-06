@@ -186,7 +186,7 @@ def test_two_shared_attributes_between_the_same_pair_merge_into_one_link():
     )
     links = service.person_network("a", degree=1)["links"]
     assert len(links) == 1
-    assert links[0]["label"] == "2 shared details"
+    assert links[0]["label"] == "2 connections"
     assert {v["connector_tag"] for v in links[0]["via"]} == {"phone", "email"}
 
 
@@ -229,6 +229,141 @@ def test_a_shared_employer_connects_two_people():
     assert network["links"][0]["label"] == "shared company"
     # the company itself is a reason, never a node on the person canvas
     assert "acme" not in ids(network)
+
+
+# ------------------------------------------------- linked organisations
+# Modelled on the real intel_kg_v2 data: Priya works at Meridian, Arjun at
+# Nimbus, and Nimbus pays Meridian. They share nothing at all, yet they are
+# plainly connected.
+
+
+@pytest.fixture
+def linked_employers():
+    return make_service(
+        {
+            "p:priya": person("Priya Sharma"),
+            "p:arjun": person("Arjun Mehta"),
+            "co:meridian": thing("company", "Meridian Exports LLP"),
+            "co:nimbus": thing("company", "Nimbus Trade Solutions Pvt Ltd"),
+        },
+        [
+            ("p:priya", "co:meridian", "WORKS_AT"),
+            ("p:arjun", "co:nimbus", "WORKS_AT"),
+            ("co:nimbus", "co:meridian", "PAYS"),
+        ],
+    )
+
+
+def test_people_at_companies_that_pay_each_other_are_connected(linked_employers):
+    network = linked_employers.person_network("p:priya", degree=1)
+    assert degrees(network) == {"p:priya": 0, "p:arjun": 1}
+    assert link_pairs(network) == {("p:arjun", "p:priya")}
+
+
+def test_a_linked_employer_link_reads_in_the_stored_direction(linked_employers):
+    link = linked_employers.person_network("p:priya", degree=1)["links"][0]
+    assert link["label"] == "Nimbus Trade Solutions Pvt Ltd pays Meridian Exports LLP"
+    via = link["via"][0]
+    assert via["kind"] == "linked_organisation"
+    assert via["edge_types"] == ["PAYS"]
+    assert {via["connector_label"], via["linked_label"]} == {
+        "Meridian Exports LLP",
+        "Nimbus Trade Solutions Pvt Ltd",
+    }
+
+
+def test_neither_company_becomes_a_node(linked_employers):
+    assert ids(linked_employers.person_network("p:priya", degree=1)) == [
+        "p:priya",
+        "p:arjun",
+    ]
+
+
+def test_unrelated_companies_do_not_connect_their_staff():
+    service = make_service(
+        {
+            "a": person("Alice"),
+            "b": person("Bob"),
+            "co:1": thing("company", "Acme"),
+            "co:2": thing("company", "Globex"),
+        },
+        [("a", "co:1", "WORKS_AT"), ("b", "co:2", "WORKS_AT")],
+    )
+    assert service.person_network("a", degree=1)["links"] == []
+
+
+def test_a_shared_employer_still_reads_as_shared_not_bridged():
+    service = make_service(
+        {"a": person("Alice"), "b": person("Bob"), "co:1": thing("company", "Acme")},
+        [("a", "co:1", "WORKS_AT"), ("b", "co:1", "WORKS_AT")],
+    )
+    link = service.person_network("a", degree=1)["links"][0]
+    assert link["label"] == "shared company"
+    assert link["via"][0]["kind"] == "shared_attribute"
+
+
+def test_only_organisations_bridge_not_phones():
+    # Two phones joined by RELATED_TO must not connect their owners — the
+    # bridge is deliberately restricted to organisation-like connectors.
+    service = make_service(
+        {
+            "a": person("Alice"),
+            "b": person("Bob"),
+            "phone:1": thing("phone", "+91-111"),
+            "phone:2": thing("phone", "+91-222"),
+        },
+        [
+            ("a", "phone:1", "HAS_PHONE"),
+            ("b", "phone:2", "HAS_PHONE"),
+            ("phone:1", "phone:2", "RELATED_TO"),
+        ],
+    )
+    assert service.person_network("a", degree=1)["links"] == []
+
+
+def test_a_hub_employer_does_not_bridge_everyone_to_everyone():
+    staff = {f"p{i}": person(f"P{i}") for i in range(6)}
+    service = make_service(
+        {**staff, "co:big": thing("company", "BigCorp"), "co:small": thing("company", "SmallCo")},
+        [
+            *[(f"p{i}", "co:big", "WORKS_AT") for i in range(5)],
+            ("p5", "co:small", "WORKS_AT"),
+            ("co:big", "co:small", "PAYS"),
+        ],
+    )
+    network = service.person_network("p5", degree=1, max_fanout=3)
+    assert all(via["kind"] != "linked_organisation" for link in network["links"] for via in link["via"])
+
+
+def test_a_bridge_rediscovered_from_the_far_side_is_not_counted_twice(linked_employers):
+    """Level 2 walks Arjun->Nimbus->Meridian->Priya, the same bridge level 1
+    walked the other way. One reason, not two."""
+    for requested in (2, 3):
+        link = linked_employers.person_network("p:priya", degree=requested)["links"][0]
+        assert len(link["via"]) == 1
+        assert link["label"] == "Nimbus Trade Solutions Pvt Ltd pays Meridian Exports LLP"
+
+
+def test_bridged_people_extend_to_the_next_degree():
+    service = make_service(
+        {
+            "p:priya": person("Priya"),
+            "p:arjun": person("Arjun"),
+            "p:kiran": person("Kiran"),
+            "co:meridian": thing("company", "Meridian"),
+            "co:nimbus": thing("company", "Nimbus"),
+            "phone:1": thing("phone", "+91-111"),
+        },
+        [
+            ("p:priya", "co:meridian", "WORKS_AT"),
+            ("p:arjun", "co:nimbus", "WORKS_AT"),
+            ("co:nimbus", "co:meridian", "PAYS"),
+            ("p:arjun", "phone:1", "HAS_PHONE"),
+            ("p:kiran", "phone:1", "HAS_PHONE"),
+        ],
+    )
+    network = service.person_network("p:priya", degree=2)
+    assert degrees(network) == {"p:priya": 0, "p:arjun": 1, "p:kiran": 2}
 
 
 # --------------------------------------------------------------- guardrails
@@ -297,7 +432,11 @@ def test_edge_types_absent_from_the_space_are_never_queried(shared_phone):
     shared_phone.client.store.edge_types.clear()
     shared_phone.client.store.edge_types["RELATED_TO"] = object()
     network = shared_phone.person_network("a", degree=1)
-    assert network["connectors"] == {"direct": ["RELATED_TO"], "shared": []}
+    assert network["connectors"] == {
+        "direct": ["RELATED_TO"],
+        "shared": [],
+        "bridge": ["RELATED_TO"],
+    }
     assert network["links"] == []
 
 

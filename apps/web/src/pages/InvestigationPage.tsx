@@ -26,8 +26,13 @@ export function riskColor(level: string): string {
 }
 
 function viaText(via: PersonLinkVia): string {
-  if (via.kind === 'direct') return via.label
-  return `${via.connector_tag.replace(/_/g, ' ')}: ${via.connector_label}`
+  // Only a shared_attribute is something the two people have in common; the
+  // other kinds carry a ready sentence, and rendering them as "company: X"
+  // would claim they share X when they don't.
+  if (via.kind === 'shared_attribute') {
+    return `${via.connector_tag.replace(/_/g, ' ')}: ${via.connector_label}`
+  }
+  return via.label
 }
 
 /** Investigation canvas: search a person, see who they're connected to
