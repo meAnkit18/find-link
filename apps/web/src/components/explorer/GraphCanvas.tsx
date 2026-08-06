@@ -2,7 +2,7 @@ import { useEffect, useImperativeHandle, useMemo, useRef, useState, forwardRef, 
 import cytoscape, { type Core, type ElementDefinition, type StylesheetStyle } from 'cytoscape'
 import fcose from 'cytoscape-fcose'
 import type { GraphEdge, GraphNode } from '../../api/types'
-import { EDGE_COLOR, SELECT_COLOR, colorForTag, edgeId, edgeLabel, roleForNode } from './graphStyle'
+import { EDGE_COLOR, SELECT_COLOR, colorForTag, edgeId, edgeLabel, edgeWeight, roleForNode } from './graphStyle'
 import GraphPopup, { type GraphPopupInfo } from './GraphPopup'
 
 cytoscape.use(fcose)
@@ -64,7 +64,11 @@ const STYLE: StylesheetStyle[] = [
   {
     selector: 'edge',
     style: {
-      width: 1.5,
+      // Investigation's person links carry a `weight` (how many separate
+      // things two people share), so an overlap of three details reads as
+      // visibly stronger than a single shared email. Everything else has
+      // weight 1 and renders exactly as it always did.
+      width: (ele: cytoscape.EdgeSingular) => 1.5 + Math.min(Number(ele.data('weight')) || 1, 5) - 1,
       'line-color': 'rgba(148, 163, 184, 0.45)',
       'target-arrow-color': 'rgba(148, 163, 184, 0.6)',
       'target-arrow-shape': 'triangle',
@@ -77,6 +81,17 @@ const STYLE: StylesheetStyle[] = [
       'text-background-opacity': 0,
       'text-background-padding': '2px',
       'text-opacity': 0,
+    },
+  },
+  {
+    // A person-to-attribute spoke is structure, not a finding: it should
+    // recede so the person-to-person links stay the thing you read first.
+    selector: 'edge.edge-spoke',
+    style: {
+      width: 1,
+      'line-color': 'rgba(148, 163, 184, 0.22)',
+      'line-style': 'dashed',
+      'target-arrow-shape': 'none',
     },
   },
   {
@@ -130,6 +145,32 @@ function fcoseLayoutOptions(randomize: boolean) {
   }
 }
 
+/** Run the force layout over the nodes that are free to move, leaving
+ * pinned ones (Investigation's radially-placed attribute rings) exactly
+ * where the caller put them. With nothing pinned this is the whole graph,
+ * i.e. identical to `cy.layout(...)`. */
+function layoutFreeNodes(cy: Core, pinned: Map<string, cytoscape.Position>, randomize: boolean) {
+  const free = pinned.size === 0 ? cy.nodes() : cy.nodes().filter((ele) => !pinned.has(ele.id()))
+  const elements = free.union(free.edgesWith(free))
+  // fcose's options (animate/randomize/nodeRepulsion/...) aren't part of
+  // @types/cytoscape's built-in layout typings, hence the cast.
+  return elements.layout(fcoseLayoutOptions(randomize) as unknown as cytoscape.LayoutOptions)
+}
+
+/** Move pinned nodes onto their given positions and lock them, so neither
+ * the force layout nor a stray drag can pull an attribute out of its ring. */
+function applyPinnedPositions(cy: Core, pinned: Map<string, cytoscape.Position>) {
+  cy.batch(() => {
+    for (const [id, position] of pinned) {
+      const ele = cy.getElementById(id)
+      if (ele.empty()) continue
+      ele.unlock()
+      ele.position({ ...position })
+      ele.lock()
+    }
+  })
+}
+
 export interface GraphCanvasHandle {
   zoomIn: () => void
   zoomOut: () => void
@@ -151,10 +192,31 @@ interface Props {
    * on its own expanded-state tracking (single click toggles both). */
   onToggleExpand: (vid: string) => void
   onZoomChange?: (zoom: number) => void
+  /** Nodes the caller places itself — Investigation's radial attribute
+   * rings. These are excluded from the force layout and locked in place.
+   * Omit for the default behavior: everything is laid out by fcose. */
+  pinnedPositions?: Map<string, cytoscape.Position>
+  /** Fired while a hub node is dragged, so a caller pinning children
+   * around it can keep the ring centred on its parent. */
+  onParentMoved?: (vid: string, position: cytoscape.Position) => void
+  /** Fired once the force layout settles, with where every node landed —
+   * what a caller needs before it can place anything relative to them. */
+  onPositionsSettled?: (positions: Map<string, cytoscape.Position>) => void
 }
 
 const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas(
-  { nodes, edges, selectedVid, mainTags, onSelect, onToggleExpand, onZoomChange },
+  {
+    nodes,
+    edges,
+    selectedVid,
+    mainTags,
+    onSelect,
+    onToggleExpand,
+    onZoomChange,
+    pinnedPositions,
+    onParentMoved,
+    onPositionsSettled,
+  },
   ref,
 ) {
   const containerRef = useRef<HTMLDivElement>(null)
@@ -165,8 +227,19 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas(
   const positionsRef = useRef<Map<string, cytoscape.Position>>(new Map())
   const onSelectRef = useRef(onSelect)
   const onToggleExpandRef = useRef(onToggleExpand)
+  const onParentMovedRef = useRef(onParentMoved)
+  const onPositionsSettledRef = useRef(onPositionsSettled)
+  onPositionsSettledRef.current = onPositionsSettled
   onSelectRef.current = onSelect
   onToggleExpandRef.current = onToggleExpand
+  onParentMovedRef.current = onParentMoved
+
+  const emptyPinned = useMemo(() => new Map<string, cytoscape.Position>(), [])
+  const pinnedNodes = pinnedPositions ?? emptyPinned
+  // Read by the mount-time event handlers and the imperative relayout(),
+  // which both outlive any single render.
+  const pinnedPositionsRef = useRef(pinnedNodes)
+  pinnedPositionsRef.current = pinnedNodes
 
   const [popupInfo, setPopupInfo] = useState<GraphPopupInfo | null>(null)
   const [pinned, setPinned] = useState(false)
@@ -230,6 +303,15 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas(
     cy.on('dragfree', 'node', (evt) => {
       positionsRef.current.set(evt.target.id(), { ...evt.target.position() })
     })
+    // A dragged hub carries its pinned children with it, so an attribute
+    // ring stays centred on the person it belongs to.
+    cy.on('drag', 'node', (evt) => {
+      const notify = onParentMovedRef.current
+      if (!notify) return
+      const vid = evt.target.id()
+      if (pinnedPositionsRef.current.has(vid)) return
+      notify(vid, { ...evt.target.position() })
+    })
     cy.on('mouseover', 'node', (evt) => {
       if (!pinnedRef.current) setPopupInfo(nodePopupInfo(evt.target))
     })
@@ -289,9 +371,7 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas(
       relayout: () => {
         const cy = cyRef.current
         if (!cy) return
-        // fcose's options (animate/randomize/nodeRepulsion/...) aren't part of
-        // @types/cytoscape's built-in layout typings, hence the cast.
-        cy.layout(fcoseLayoutOptions(false) as unknown as cytoscape.LayoutOptions).run()
+        layoutFreeNodes(cy, pinnedPositionsRef.current, false).run()
       },
       exportPng: () => {
         const cy = cyRef.current
@@ -331,18 +411,28 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas(
     const newNodeEles: ElementDefinition[] = []
     for (const n of nodes) {
       if (!cy.getElementById(n.vid).empty()) continue
-      const saved = positionsRef.current.get(n.vid)
-      if (!saved) brandNewCount++
+      // A pinned node already has the position the caller wants; it must not
+      // count as "brand new", or adding one attribute would re-run the force
+      // layout and reshuffle every person on the canvas.
+      const placed = pinnedNodes.get(n.vid) ?? positionsRef.current.get(n.vid)
+      if (!placed) brandNewCount++
       newNodeEles.push({
         data: { id: n.vid, label: n.label, tag: n.tags[0] ?? 'entity', role: roleForNode(n, mainTags) },
-        ...(saved ? { position: { ...saved } } : {}),
+        ...(placed ? { position: { ...placed } } : {}),
       })
     }
 
     const newEdgeEles: ElementDefinition[] = edges
       .filter((e) => cy.getElementById(edgeId(e)).empty())
       .map((e) => ({
-        data: { id: edgeId(e), source: e.src, target: e.dst, edgeType: edgeLabel(e) },
+        data: {
+          id: edgeId(e),
+          source: e.src,
+          target: e.dst,
+          edgeType: edgeLabel(e),
+          weight: edgeWeight(e),
+        },
+        ...(pinnedNodes.has(e.src) || pinnedNodes.has(e.dst) ? { classes: 'edge-spoke' } : {}),
       }))
 
     cy.add([...newNodeEles, ...newEdgeEles])
@@ -365,6 +455,12 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas(
       if (ele.empty()) continue
       const label = edgeLabel(e)
       if (ele.data('edgeType') !== label) ele.data('edgeType', label)
+      const weight = edgeWeight(e)
+      if (ele.data('weight') !== weight) ele.data('weight', weight)
+      // An edge can gain a pinned endpoint after it was added (the user just
+      // expanded one of its people), which turns it into an attribute spoke.
+      const isSpoke = pinnedNodes.has(e.src) || pinnedNodes.has(e.dst)
+      if (isSpoke !== ele.hasClass('edge-spoke')) ele.toggleClass('edge-spoke', isSpoke)
     }
 
     // Only run the layout when nodes appear that have never had a position
@@ -372,23 +468,22 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas(
     // and toggling edge types keep the existing layout untouched, so the
     // graph no longer reshuffles on every filter click.
     if (brandNewCount > 0) {
-      // fcose's options (animate/randomize/nodeRepulsion/...) aren't part of
-      // @types/cytoscape's built-in layout typings, hence the cast.
-      const layout = cy.layout(
-        fcoseLayoutOptions(!hadNodesBefore) as unknown as cytoscape.LayoutOptions,
-      )
+      const layout = layoutFreeNodes(cy, pinnedNodes, !hadNodesBefore)
       layout.one('layoutstop', () => {
         // Cache the settled positions of everything, then make sure the
         // result is actually on screen.
         cy.nodes().forEach((ele) => { positionsRef.current.set(ele.id(), { ...ele.position() }) })
+        applyPinnedPositions(cy, pinnedNodes)
+        onPositionsSettledRef.current?.(new Map(positionsRef.current))
         if (!hadNodesBefore) cy.fit(undefined, 40)
         else ensureGraphVisible(cy)
       })
       layout.run()
-    } else if (newNodeEles.length > 0 || newEdgeEles.length > 0) {
-      ensureGraphVisible(cy)
+    } else {
+      applyPinnedPositions(cy, pinnedNodes)
+      if (newNodeEles.length > 0 || newEdgeEles.length > 0) ensureGraphVisible(cy)
     }
-  }, [nodes, edges, mainTags])
+  }, [nodes, edges, mainTags, pinnedNodes])
 
   useEffect(() => {
     const cy = cyRef.current

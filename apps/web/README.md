@@ -30,6 +30,31 @@ different origin, set `VITE_API_BASE_URL`.
 - Plain CSS (see `src/index.css` / `src/styles/tokens.css`) — no Tailwind
   toolchain.
 
+## The Investigation page
+
+Unlike Explorer, which renders whatever is in the graph, Investigation is
+**person-centric**: people are the only primary nodes.
+
+The graph stores a person's phone/email/address/passport/employer as
+separate vertices hanging off the person, so two people who share a phone
+are two hops apart with no edge between them. Investigation therefore
+renders a *projection* served by `GET /api/entities/{id}/person-network`,
+where a link means "these two share something" and carries the shared thing
+along as its reason. The **Degree** control (1/2/3) counts those
+connections, not stored hops: 1 is a direct share, 2 a friend of a friend,
+3 one step further.
+
+Clicking a person fans their own details out in a ring around them
+(`GET /api/entities/{id}/attributes`). Those attribute nodes are placed by
+`components/explorer/radialLayout.ts` and handed to the canvas as
+`pinnedPositions` — they're locked and excluded from the fcose run, so
+adding one doesn't reshuffle the people. An attribute two expanded people
+share sits between them, since it's the reason they're linked.
+
+`GraphCanvas`'s `pinnedPositions` / `onParentMoved` / `onPositionsSettled`
+props are all optional; Explorer passes none of them and behaves exactly as
+before.
+
 ## Checks
 
     npx tsc -b       # type-check

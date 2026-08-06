@@ -105,6 +105,74 @@ export interface EntityGraph {
   edges: GraphEdge[]
 }
 
+// -- Person network (the Investigation projection) ---------------------------
+// The graph stores a person's phone/email/address/employer as separate
+// vertices, so two people who share one are two hops apart with no edge
+// between them. These types describe the *projected* person-only graph,
+// where a link means "these two share something" and `via` says what.
+
+export interface PersonNode {
+  id: string
+  label: string
+  /** 0 for the searched person, 1/2/3 for how many connections away. */
+  degree: number
+  entity_type: string
+  properties: Record<string, unknown>
+}
+
+export type PersonLinkVia =
+  | { kind: 'direct'; edge_types: string[]; label: string }
+  | {
+      kind: 'shared_attribute'
+      connector_id: string
+      connector_tag: string
+      connector_label: string
+      edge_types: string[]
+    }
+
+export interface PersonLink {
+  source: string
+  target: string
+  degree: number
+  /** Human-readable summary of `via`, e.g. "shared phone". */
+  label: string
+  via: PersonLinkVia[]
+}
+
+/** A connector held by so many people it says nothing — reported rather
+ * than silently dropped, so the canvas can admit what it left out. */
+export interface SuppressedHub {
+  id: string
+  label: string
+  tag: string
+  person_count: number
+}
+
+export interface PersonNetwork {
+  root_id: string
+  degree: number
+  persons: PersonNode[]
+  links: PersonLink[]
+  truncated: boolean
+  suppressed_hubs: SuppressedHub[]
+  connectors: { direct: string[]; shared: string[] }
+}
+
+export interface EntityAttribute {
+  id: string
+  tag: string
+  label: string
+  edge_type: string
+  properties: Record<string, unknown>
+  /** Other people holding this same attribute — the reason for a link. */
+  shared_with: string[]
+}
+
+export interface EntityAttributes {
+  entity_id: string
+  attributes: EntityAttribute[]
+}
+
 export interface PathResult {
   paths: {
     vertices: { vid: string; tags: Record<string, unknown> }[]

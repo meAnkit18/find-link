@@ -5,6 +5,13 @@ primary nodes; 1/2/3-degree person-to-person connections are computed by
 projecting through shared attributes; clicking a person fans its own
 attributes out radially around it.
 
+> **Status: implemented.** Kept as the design record for the change.
+> One deviation from the plan below: persons carry no `attribute_count`.
+> Counting a person's details for everyone in the network needs data the
+> BFS doesn't collect for nodes discovered at the far end of a level, and a
+> number that's right for some people and wrong for others is worse than no
+> number — the UI fetches attributes on click instead.
+
 **Scope:** `apps/web/src/pages/InvestigationPage.tsx` and the graph canvases,
 a new person-projection service + endpoints in `apps/api`, and one batched
 traversal primitive in `graph-core`. Explorer, agent-tools, risk, and
@@ -113,7 +120,7 @@ type, and `GO ... OVER <unknown>` is a hard nGQL error.
   "degree": 2,
   "persons": [
     { "id": "person:1", "label": "A. Kumar", "degree": 0,
-      "properties": {…}, "attribute_count": 6 }
+      "entity_type": "Person", "properties": {…} }
   ],
   "links": [
     { "source": "person:1", "target": "person:2", "degree": 1,

@@ -4,6 +4,7 @@ import type {
   CaseSummary,
   DeleteEvidenceResponse,
   Direction,
+  EntityAttributes,
   EntityGraph,
   EntitySearchHit,
   EvidenceDetail,
@@ -16,6 +17,7 @@ import type {
   NodeDetail,
   NoteAdded,
   PathResult,
+  PersonNetwork,
   ReviewItem,
   RiskExplanation,
   RiskResult,
@@ -118,11 +120,29 @@ export const api = {
     ),
 
   // -- Entities ---------------------------------------------------------------
-  searchEntities: (q: string) => request<EntitySearchHit[]>(`/api/entities/search${qs({ q })}`),
+  searchEntities: (q: string, entityType?: string) =>
+    request<EntitySearchHit[]>(`/api/entities/search${qs({ q, entity_type: entityType })}`),
   getEntity: (entityId: string) =>
     request<Record<string, unknown>>(`/api/entities/${encodeURIComponent(entityId)}`),
   expandEntityGraph: (entityId: string, depth = 1) =>
     request<EntityGraph>(`/api/entities/${encodeURIComponent(entityId)}/graph${qs({ depth })}`),
+  /** Persons within `degree` connections of this person, and why they're
+   * connected. Degree counts connections, not stored hops. */
+  getPersonNetwork: (
+    entityId: string,
+    degree = 1,
+    opts?: { connectors?: string[]; maxFanout?: number; maxPersons?: number },
+  ) =>
+    request<PersonNetwork>(
+      `/api/entities/${encodeURIComponent(entityId)}/person-network${qs({
+        degree,
+        connectors: opts?.connectors?.join(','),
+        max_fanout: opts?.maxFanout,
+        max_persons: opts?.maxPersons,
+      })}`,
+    ),
+  getEntityAttributes: (entityId: string) =>
+    request<EntityAttributes>(`/api/entities/${encodeURIComponent(entityId)}/attributes`),
   getEntityRisk: (entityId: string) =>
     request<RiskResult>(`/api/entities/${encodeURIComponent(entityId)}/risk`),
   explainEntityRisk: (entityId: string) =>

@@ -30,6 +30,31 @@ interface Props {
   mainTags: Set<string>
   onSelect: (vid: string | null) => void
   onToggleExpand: (vid: string) => void
+  /** child node id -> the expanded parents it hangs off. Given these, the
+   * children are held in a ring around their parent instead of being pushed
+   * around by the force simulation — the 3D counterpart of the 2D canvas's
+   * pinned radial layout. A child with two parents sits between them. */
+  ringParents?: Map<string, string[]>
+}
+
+const RING_RADIUS = 26
+const RING_SPACING = 13
+
+interface RingSlot {
+  parentIds: string[]
+  index: number
+  count: number
+}
+
+/** A Node3D after the simulation has attached coordinates to it. fx/fy/fz
+ * are d3-force's "hold this node here" fields. */
+type SimNode = Node3D & {
+  x?: number
+  y?: number
+  z?: number
+  fx?: number
+  fy?: number
+  fz?: number
 }
 
 /* ---- world-space text sprites, ported from kindred-main's graph-3d.tsx ---- */
@@ -105,7 +130,7 @@ function makeGlowTexture(color: string): THREE.CanvasTexture {
 }
 
 const GraphCanvas3D = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas3D(
-  { nodes, edges, selectedVid, mainTags, onSelect, onToggleExpand },
+  { nodes, edges, selectedVid, mainTags, onSelect, onToggleExpand, ringParents },
   ref,
 ) {
   const fgRef = useRef<ForceGraphMethods<Node3D, Link3D>>()
@@ -139,6 +164,58 @@ const GraphCanvas3D = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas3
     const graphLinks: Link3D[] = edges.map((e) => ({ source: e.src, target: e.dst, label: edgeLabel(e) }))
     return { nodes: graphNodes, links: graphLinks }
   }, [nodes, edges, mainTags])
+
+  /** Each ring child's slot: which parents it hangs off, and its position
+   * within that parent's ring. Sorted by id so the ring is stable across
+   * re-renders instead of reshuffling every tick. */
+  const ringSlots = useMemo(() => {
+    const slots = new Map<string, RingSlot>()
+    if (!ringParents || ringParents.size === 0) return slots
+    const byParentKey = new Map<string, string[]>()
+    for (const [childId, parentIds] of ringParents) {
+      const key = [...parentIds].sort().join('|')
+      const group = byParentKey.get(key)
+      if (group) group.push(childId)
+      else byParentKey.set(key, [childId])
+    }
+    for (const [key, children] of byParentKey) {
+      children.sort()
+      const parentIds = key.split('|')
+      children.forEach((childId, index) => {
+        slots.set(childId, { parentIds, index, count: children.length })
+      })
+    }
+    return slots
+  }, [ringParents])
+
+  const holdRings = useCallback(() => {
+    if (ringSlots.size === 0) return
+    // react-force-graph mutates the very node objects we hand it, writing
+    // x/y/z each tick and honoring fx/fy/fz as fixed positions.
+    const byId = new Map((graphData.nodes as SimNode[]).map((n) => [n.id, n]))
+    for (const [childId, slot] of ringSlots) {
+      const child = byId.get(childId)
+      if (!child) continue
+      const anchors = slot.parentIds
+        .map((id) => byId.get(id))
+        .filter((p): p is SimNode => p != null && p.x != null)
+      if (anchors.length === 0) continue
+      if (anchors.length > 1) {
+        // Shared by several expanded people: it's the reason they're
+        // linked, so it belongs between them.
+        child.fx = anchors.reduce((sum, p) => sum + (p.x ?? 0), 0) / anchors.length
+        child.fy = anchors.reduce((sum, p) => sum + (p.y ?? 0), 0) / anchors.length
+        child.fz = anchors.reduce((sum, p) => sum + (p.z ?? 0), 0) / anchors.length
+        continue
+      }
+      const parent = anchors[0]
+      const radius = Math.max(RING_RADIUS, (slot.count * RING_SPACING) / (2 * Math.PI))
+      const angle = (slot.index / slot.count) * 2 * Math.PI
+      child.fx = (parent.x ?? 0) + radius * Math.cos(angle)
+      child.fy = (parent.y ?? 0) + radius * Math.sin(angle)
+      child.fz = parent.z ?? 0
+    }
+  }, [ringSlots, graphData])
 
   // Same tag breakdown as the 2D canvas's bottom legend bar.
   const legend = useMemo(() => {
@@ -339,6 +416,7 @@ const GraphCanvas3D = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas3
         linkDirectionalArrowColor={() => EDGE_COLOR}
         showNavInfo={false}
         enableNodeDrag={true}
+        onEngineTick={holdRings}
         onNodeHover={(node) => {
           if (pinnedRef.current) return
           setPopupInfo(node ? nodePopupInfo(node) : null)

@@ -36,6 +36,14 @@ export function roleForNode(node: GraphNode, mainTags: Set<string>): NodeRole {
   return node.tags.some((t) => mainTags.has(t)) ? 'main' : 'sub'
 }
 
+/** How many separate things this edge represents. Investigation's projected
+ * person links set `via_count` (two people can share a phone *and* an
+ * address); everything else is a single relationship, weight 1. */
+export function edgeWeight(edge: GraphEdge): number {
+  const count = Number(edge.properties?.via_count)
+  return Number.isFinite(count) && count > 0 ? count : 1
+}
+
 /** Prefer the human-readable relationship label captured at ingestion
  * (stored as the `relationship_type` edge property) over the raw edge
  * type code, e.g. "childhood friend" instead of "RELATED_TO". */

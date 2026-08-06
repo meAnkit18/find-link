@@ -1,18 +1,18 @@
-import { useMemo, useRef, useState } from 'react'
+import { useCallback, useMemo, useRef, useState } from 'react'
+import type { Position } from 'cytoscape'
 import { api } from '../api/client'
-import type { EntityGraphNode, EntitySearchHit, GraphNode, RiskResult } from '../api/types'
+import type { EntitySearchHit, PersonLink, PersonLinkVia, RiskResult } from '../api/types'
 import JsonView from '../components/common/JsonView'
 import InfoTooltip from '../components/common/InfoTooltip'
 import GraphCanvas, { type GraphCanvasHandle } from '../components/explorer/GraphCanvas'
 import GraphCanvas3D from '../components/explorer/GraphCanvas3D'
 import GraphControls from '../components/explorer/GraphControls'
-import { roleForNode } from '../components/explorer/graphStyle'
-import { computeVisibleGraph } from '../components/explorer/graphVisibility'
-import { useGraphCanvasState } from '../hooks/useGraphCanvasState'
+import { computeRadialPositions, type RadialChild } from '../components/explorer/radialLayout'
+import { usePersonNetworkState, PERSON_TAG } from '../hooks/usePersonNetworkState'
 
-// Fixed to the canonical schema (packages/ingestion-core/src/ingestion_core/canonical.py):
-// person/company/organization are the hub entities everything else attaches to.
-const MAIN_TAGS = new Set(['person', 'company', 'organization'])
+// People are the only primary nodes here: everything else on the canvas is
+// an attribute fanned out from a person the investigator clicked.
+const MAIN_TAGS = new Set([PERSON_TAG])
 
 export function riskColor(level: string): string {
   switch (level) {
@@ -25,18 +25,17 @@ export function riskColor(level: string): string {
   }
 }
 
-function toGraphNode(n: EntityGraphNode): GraphNode {
-  const properties: Record<string, unknown> = {}
-  for (const props of Object.values(n.tags)) Object.assign(properties, props)
-  return { vid: n.id, tags: Object.keys(n.tags), label: n.label || n.id, properties }
+function viaText(via: PersonLinkVia): string {
+  if (via.kind === 'direct') return via.label
+  return `${via.connector_tag.replace(/_/g, ' ')}: ${via.connector_label}`
 }
 
-/** Investigation canvas: search people, load their neighborhood into the
- * shared graph canvas, inspect nodes, see risk scores, expand deeper by
- * clicking a node (click again to collapse it), and run shortest-path
- * between two picked nodes. */
+/** Investigation canvas: search a person, see who they're connected to
+ * within 1/2/3 degrees and *why* (the shared phone, address, employer, ...),
+ * click any person to fan their own details out in a ring around them, and
+ * run shortest-path between two picked people. */
 export function InvestigationGraphPage() {
-  const graphState = useGraphCanvasState()
+  const graph = usePersonNetworkState()
   const [view, setView] = useState<'2d' | '3d'>('2d')
   const canvas2DRef = useRef<GraphCanvasHandle>(null)
   const canvas3DRef = useRef<GraphCanvasHandle>(null)
@@ -49,96 +48,95 @@ export function InvestigationGraphPage() {
   const [searchResults, setSearchResults] = useState<EntitySearchHit[]>([])
   const [searchError, setSearchError] = useState<string | null>(null)
 
+  const [rootId, setRootId] = useState<string | null>(null)
   const [selectedVid, setSelectedVid] = useState<string | null>(null)
-  const [expandedVids, setExpandedVids] = useState<Set<string>>(new Set())
-  const [expandingVids, setExpandingVids] = useState<Set<string>>(new Set())
-  const [revealedVids, setRevealedVids] = useState<Set<string>>(new Set())
+  const [degree, setDegree] = useState(1)
   const [zoom, setZoom] = useState(1)
   const [isFullscreen, setIsFullscreen] = useState(false)
   const [risk, setRisk] = useState<RiskResult | null>(null)
-  const [depth, setDepth] = useState(1)
   const [pathSource, setPathSource] = useState<string | null>(null)
   const [pathResult, setPathResult] = useState<unknown>(null)
   const [status, setStatus] = useState<string | null>(null)
+
+  // Where the force layout put each person. Attribute rings are placed
+  // relative to these, so they have to come back from the canvas.
+  const [positions, setPositions] = useState<Map<string, Position>>(new Map())
+
+  const handlePositionsSettled = useCallback((settled: Map<string, Position>) => {
+    setPositions(new Map(settled))
+  }, [])
+
+  const handleParentMoved = useCallback((vid: string, position: Position) => {
+    setPositions((prev) => new Map(prev).set(vid, { ...position }))
+  }, [])
+
+  const radialChildren = useMemo<RadialChild[]>(
+    () =>
+      [...graph.attributeParents.entries()].map(([attributeId, parentIds]) => {
+        const attribute = graph.attributes.get(parentIds[0])?.find((a) => a.id === attributeId)
+        return {
+          id: attributeId,
+          parentIds,
+          sortKey: `${attribute?.tag ?? ''}:${attribute?.label ?? attributeId}`,
+        }
+      }),
+    [graph.attributeParents, graph.attributes],
+  )
+
+  const pinnedPositions = useMemo(
+    () => computeRadialPositions(positions, radialChildren),
+    [positions, radialChildren],
+  )
 
   async function handleSearch() {
     if (!searchQuery.trim()) return
     setSearchError(null)
     try {
-      const results = await api.searchEntities(searchQuery.trim())
+      // People only: this canvas has no other kind of primary node.
+      const results = await api.searchEntities(searchQuery.trim(), PERSON_TAG)
       setSearchResults(results)
-      if (results.length === 0) setSearchError('No matches.')
+      if (results.length === 0) setSearchError('No people matched.')
     } catch (err) {
       setSearchResults([])
       setSearchError((err as Error).message)
     }
   }
 
-  async function loadEntity(entityId: string, replace: boolean) {
-    if (expandingVids.has(entityId)) return
-    setExpandingVids((prev) => new Set(prev).add(entityId))
-    setStatus(`Expanding ${entityId} (depth ${depth})…`)
-    try {
-      const data = await api.expandEntityGraph(entityId, depth)
-      const nodes = data.nodes.map(toGraphNode)
-      if (replace) {
-        const rootNode = nodes.find((n) => n.vid === entityId) ?? {
-          vid: entityId,
-          tags: [],
-          label: entityId,
-          properties: {},
-        }
-        graphState.setOverview([rootNode], [])
-        graphState.mergeExpansion(entityId, nodes, data.edges)
-        setExpandedVids(new Set([entityId]))
-      } else {
-        graphState.mergeExpansion(entityId, nodes, data.edges)
-        setExpandedVids((prev) => new Set(prev).add(entityId))
-      }
-      setStatus(null)
-    } catch (err) {
-      setStatus(`✗ ${(err as Error).message}`)
-    } finally {
-      setExpandingVids((prev) => {
-        const next = new Set(prev)
-        next.delete(entityId)
-        return next
-      })
-    }
-  }
-
-  function nodeRole(vid: string): 'main' | 'sub' {
-    const node = graphState.nodes.get(vid)
-    if (!node) return 'sub'
-    return roleForNode(node, MAIN_TAGS)
-  }
-
-  /** Reveal (or hide) a main node's own already-loaded sub-nodes — a pure,
-   * instant visibility toggle, decoupled from network fetching. The first
-   * time a main node is revealed, if we've never fetched its neighborhood
-   * (true for any main node discovered only as someone else's neighbor),
-   * also fetch it so there's something to reveal. Hiding never discards
-   * fetched data — re-revealing is instant, no spinner. Sub nodes have no
-   * expand affordance; clicking one is select-only. */
-  function toggleReveal(vid: string) {
-    if (nodeRole(vid) !== 'main') return
-    const alreadyRevealed = revealedVids.has(vid)
-    setRevealedVids((prev) => {
-      const next = new Set(prev)
-      if (alreadyRevealed) next.delete(vid)
-      else next.add(vid)
-      return next
-    })
-    if (!alreadyRevealed && !expandedVids.has(vid)) {
-      void loadEntity(vid, false)
-    }
+  async function loadNetwork(personId: string, nextDegree: number) {
+    setStatus(`Finding connections within ${nextDegree} degree${nextDegree === 1 ? '' : 's'}…`)
+    const result = await graph.loadNetwork(personId, nextDegree)
+    setPositions(new Map())
+    setStatus(
+      result
+        ? `${result.persons.length - 1} connected ${
+            result.persons.length === 2 ? 'person' : 'people'
+          } within ${nextDegree} degree${nextDegree === 1 ? '' : 's'}.`
+        : null,
+    )
   }
 
   async function handleSelectResult(hit: EntitySearchHit) {
     setSearchResults([])
     setSearchQuery('')
+    setRootId(hit.entity_id)
     setSelectedVid(hit.entity_id)
-    await loadEntity(hit.entity_id, true)
+    await loadNetwork(hit.entity_id, degree)
+  }
+
+  async function handleDegreeChange(next: number) {
+    setDegree(next)
+    if (rootId) await loadNetwork(rootId, next)
+  }
+
+  function isPerson(vid: string): boolean {
+    return graph.personsById.has(vid)
+  }
+
+  /** A click on a person fans their details out (or folds them back in);
+   * a click on an attribute only selects it — attributes have no children. */
+  function handleToggle(vid: string) {
+    if (!isPerson(vid)) return
+    void graph.toggleExpand(vid)
   }
 
   async function fetchRisk(entityId: string) {
@@ -163,17 +161,32 @@ export function InvestigationGraphPage() {
     }
   }
 
-  const selectedNode = selectedVid ? graphState.nodes.get(selectedVid) ?? null : null
-  const { visibleNodes: canvasNodes, visibleEdges: canvasEdges } = useMemo(
-    () =>
-      computeVisibleGraph(
-        Array.from(graphState.nodes.values()),
-        Array.from(graphState.edges.values()),
-        MAIN_TAGS,
-        revealedVids,
-      ),
-    [graphState.nodes, graphState.edges, revealedVids],
-  )
+  const selectedPerson = selectedVid ? graph.personsById.get(selectedVid) ?? null : null
+  const selectedAttribute = useMemo(() => {
+    if (!selectedVid || selectedPerson) return null
+    for (const list of graph.attributes.values()) {
+      const found = list.find((a) => a.id === selectedVid)
+      if (found) return found
+    }
+    return null
+  }, [selectedVid, selectedPerson, graph.attributes])
+
+  const selectedLinks: PersonLink[] = selectedVid
+    ? graph.linksByPerson.get(selectedVid) ?? []
+    : []
+
+  const notice = useMemo(() => {
+    const parts: string[] = []
+    if (graph.network?.truncated) {
+      parts.push('Too many connections to show them all — narrow the degree.')
+    }
+    for (const hub of graph.network?.suppressed_hubs ?? []) {
+      parts.push(
+        `Skipped ${hub.tag.replace(/_/g, ' ')} "${hub.label}" — shared by ${hub.person_count} people, so it links everyone to everyone.`,
+      )
+    }
+    return parts
+  }, [graph.network])
 
   return (
     <main className="page page--flush explorer graph-dark">
@@ -186,7 +199,7 @@ export function InvestigationGraphPage() {
             <input
               className="input"
               style={{ flex: 1 }}
-              placeholder="Search people, companies, and more…"
+              placeholder="Search for a person…"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
@@ -213,42 +226,56 @@ export function InvestigationGraphPage() {
           )}
         </div>
         <label className="row" style={{ gap: 'var(--space-2)' }}>
-          <span className="muted">Depth</span>
-          <InfoTooltip text="How many steps out from a person or company to load onto the graph at once." />
-          <select className="select" style={{ width: 90 }} value={depth} onChange={(e) => setDepth(Number(e.target.value))}>
-            <option value={1}>1 hop</option>
-            <option value={2}>2 hops</option>
-            <option value={3}>3 hops</option>
+          <span className="muted">Degree</span>
+          <InfoTooltip text="How far apart two people can be. 1 = they share something directly (a phone, an address, an employer). 2 = a friend of a friend. 3 = one step further out." />
+          <select
+            className="select"
+            style={{ width: 110 }}
+            value={degree}
+            onChange={(e) => handleDegreeChange(Number(e.target.value))}
+          >
+            <option value={1}>1 degree</option>
+            <option value={2}>2 degrees</option>
+            <option value={3}>3 degrees</option>
           </select>
         </label>
       </div>
 
-      {(status || searchError) && (
-        <div className="status-strip">{status ?? searchError}</div>
+      {(status || searchError || graph.error) && (
+        <div className="status-strip">{graph.error ?? searchError ?? status}</div>
       )}
+      {notice.map((line) => (
+        <div className="status-strip" key={line}>
+          {line}
+        </div>
+      ))}
 
       <div className="explorer-body">
         <div className="explorer-center">
           {view === '2d' ? (
             <GraphCanvas
               ref={canvas2DRef}
-              nodes={canvasNodes}
-              edges={canvasEdges}
+              nodes={graph.canvasNodes}
+              edges={graph.canvasEdges}
               selectedVid={selectedVid}
               mainTags={MAIN_TAGS}
               onSelect={setSelectedVid}
-              onToggleExpand={toggleReveal}
+              onToggleExpand={handleToggle}
               onZoomChange={setZoom}
+              pinnedPositions={pinnedPositions}
+              onParentMoved={handleParentMoved}
+              onPositionsSettled={handlePositionsSettled}
             />
           ) : (
             <GraphCanvas3D
               ref={canvas3DRef}
-              nodes={canvasNodes}
-              edges={canvasEdges}
+              nodes={graph.canvasNodes}
+              edges={graph.canvasEdges}
               selectedVid={selectedVid}
               mainTags={MAIN_TAGS}
               onSelect={setSelectedVid}
-              onToggleExpand={toggleReveal}
+              onToggleExpand={handleToggle}
+              ringParents={graph.attributeParents}
             />
           )}
           <GraphControls
@@ -276,45 +303,68 @@ export function InvestigationGraphPage() {
         </div>
 
         <div className="explorer-right">
-          {selectedNode ? (
+          {selectedPerson ? (
             <div className="panel stack">
-              <h3>{selectedNode.label}</h3>
-              <p className="text-secondary mono">{selectedNode.vid}</p>
+              <h3>{selectedPerson.label}</h3>
+              <p className="text-secondary mono">{selectedPerson.id}</p>
+              <p className="text-secondary">
+                {selectedPerson.degree === 0
+                  ? 'The person you searched for'
+                  : `${selectedPerson.degree} degree${selectedPerson.degree === 1 ? '' : 's'} from ${
+                      graph.personsById.get(graph.network?.root_id ?? '')?.label ?? 'the subject'
+                    }`}
+              </p>
 
               <div className="row" style={{ flexWrap: 'wrap' }}>
-                {nodeRole(selectedNode.vid) === 'main' && (
-                  <>
-                    <button
-                      className="btn btn--primary"
-                      onClick={() => toggleReveal(selectedNode.vid)}
-                      disabled={expandingVids.has(selectedNode.vid)}
-                    >
-                      {expandingVids.has(selectedNode.vid)
-                        ? 'Loading…'
-                        : revealedVids.has(selectedNode.vid)
-                          ? 'Hide details'
-                          : 'Show details'}
-                    </button>
-                    <InfoTooltip text="Reveal or hide this person's or company's own attribute nodes (phone, email, address, ...) on the canvas." />
-                  </>
-                )}
-                <button className="btn" onClick={() => fetchRisk(selectedNode.vid)}>
+                <button
+                  className="btn btn--primary"
+                  onClick={() => handleToggle(selectedPerson.id)}
+                  disabled={graph.loadingAttributes.has(selectedPerson.id)}
+                >
+                  {graph.loadingAttributes.has(selectedPerson.id)
+                    ? 'Loading…'
+                    : graph.expanded.has(selectedPerson.id)
+                      ? 'Hide details'
+                      : 'Show details'}
+                </button>
+                <InfoTooltip text="Fan this person's own details (phone, email, address, passport, ...) out in a ring around them." />
+                <button className="btn" onClick={() => fetchRisk(selectedPerson.id)}>
                   Risk
                 </button>
-                <InfoTooltip text="Calculate a risk score for this person or company based on their connections and known flags." />
-                {pathSource && pathSource !== selectedNode.vid ? (
-                  <button className="btn" onClick={() => runShortestPath(selectedNode.vid)}>
+                <InfoTooltip text="Calculate a risk score for this person based on their connections and known flags." />
+                {pathSource && pathSource !== selectedPerson.id ? (
+                  <button className="btn" onClick={() => runShortestPath(selectedPerson.id)}>
                     Path from {pathSource.slice(0, 12)}… → here
                   </button>
                 ) : (
-                  <button className="btn" onClick={() => setPathSource(selectedNode.vid)}>
+                  <button className="btn" onClick={() => setPathSource(selectedPerson.id)}>
                     Path: set as source
                   </button>
                 )}
-                <InfoTooltip text="Find the shortest chain of connections between two people or companies. Pick a starting point here, then click another node to find the path to it." />
+                <InfoTooltip text="Find the shortest chain of connections between two people. Pick a starting point here, then click another person." />
               </div>
 
-              {risk && risk.entity_id === selectedNode.vid && (
+              {selectedLinks.length > 0 && (
+                <div className="stack">
+                  <h4>Why connected</h4>
+                  <ul className="risk-factors">
+                    {selectedLinks.map((link) => {
+                      const otherId = link.source === selectedPerson.id ? link.target : link.source
+                      const other = graph.personsById.get(otherId)
+                      return (
+                        <li key={`${link.source}|${link.target}`}>
+                          <strong>{other?.label ?? otherId}</strong>
+                          <div className="mono muted">
+                            {link.via.map(viaText).join(' · ')}
+                          </div>
+                        </li>
+                      )
+                    })}
+                  </ul>
+                </div>
+              )}
+
+              {risk && risk.entity_id === selectedPerson.id && (
                 <div className="risk-section">
                   <h4>Risk assessment</h4>
                   <div className="risk-badge" style={{ background: riskColor(risk.level), color: '#fff' }}>
@@ -331,17 +381,43 @@ export function InvestigationGraphPage() {
               )}
 
               <h4>Properties</h4>
-              <JsonView data={selectedNode.properties} title="properties" initiallyOpen />
+              <JsonView data={selectedPerson.properties} title="properties" initiallyOpen />
+            </div>
+          ) : selectedAttribute ? (
+            <div className="panel stack">
+              <h3>{selectedAttribute.label}</h3>
+              <p className="text-secondary mono">
+                {selectedAttribute.tag} · {selectedAttribute.id}
+              </p>
+              {selectedAttribute.shared_with.length > 0 ? (
+                <div className="stack">
+                  <h4>Shared with</h4>
+                  <ul className="risk-factors">
+                    {selectedAttribute.shared_with.map((personId) => (
+                      <li key={personId}>{graph.personsById.get(personId)?.label ?? personId}</li>
+                    ))}
+                  </ul>
+                </div>
+              ) : (
+                <p className="text-secondary">Held by this person alone.</p>
+              )}
+              <h4>Properties</h4>
+              <JsonView data={selectedAttribute.properties} title="properties" initiallyOpen />
             </div>
           ) : (
             <div className="panel">
               <h3>Investigation tools</h3>
               <p className="text-secondary">
-                Search a person, company, or anything else, then click a result to load its
-                connections onto the canvas — the "Depth" selector controls how many hops
-                out. People, companies, and organizations render larger; related details
-                like phone numbers or addresses render smaller. Click an expanded node
-                again to collapse it back.
+                Search for a person and pick a result. The canvas then shows the other
+                people they're connected to — two people are connected when they share
+                something (a phone, an email, an address, a passport, an employer) or
+                have a direct relationship. "Degree" controls how far that chain runs:
+                1 is a direct share, 2 is a friend of a friend, 3 one step further.
+              </p>
+              <p className="text-secondary">
+                Click any person to fan their own details out in a ring around them, and
+                click again to fold them back in. Click a link to see exactly what the
+                two people have in common.
               </p>
             </div>
           )}
