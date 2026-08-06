@@ -46,6 +46,7 @@ from graph_explorer_api.ingest.jobs import ImportJobRunner  # noqa: E402, I001
 from graph_explorer_api.search.index import SearchIndex  # noqa: E402, I001
 from graph_explorer_api.services.graph_service import GraphService  # noqa: E402, I001
 from graph_explorer_api.services.investigation_service import InvestigationService  # noqa: E402, I001
+from graph_explorer_api.services.person_network_service import PersonNetworkService  # noqa: E402, I001
 
 logger = logging.getLogger(__name__)
 
@@ -100,6 +101,7 @@ async def lifespan(app: FastAPI):
     app.state.jobs = ImportJobRunner()
     app.state.graph_service = None
     app.state.investigation_service = None
+    app.state.person_network_service = None
 
     init_evidence_db()
 
@@ -112,6 +114,7 @@ async def lifespan(app: FastAPI):
         app.state.registry.ensure(space, INTEL_GRAPH_NAME)
         app.state.graph_service = GraphService(app.state.clients, space)
         app.state.investigation_service = InvestigationService(app.state.clients, space)
+        app.state.person_network_service = PersonNetworkService(app.state.clients, space)
         logger.info("intelligence space '%s' ready; ingest schema ensured", space)
     except Exception:
         logger.exception(

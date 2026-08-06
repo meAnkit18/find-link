@@ -108,6 +108,33 @@ class FakeTraversal:
     def count_neighbors(self, vid: str, edge_type: str | None = None, direction: str = "out") -> int:
         return len(self.get_neighbors(vid, edge_type, direction))
 
+    def neighbors_batch(
+        self,
+        vids: list[str],
+        edge_types: list[str] | None = None,
+        direction: str = "both",
+        chunk_size: int = 200,
+    ) -> list[RawEdge]:
+        self.batch_calls = getattr(self, "batch_calls", 0) + 1
+        wanted = set(edge_types) if edge_types else None
+        starts = set(vids)
+        found: list[RawEdge] = []
+        seen: set[tuple[str, str, str, int]] = set()
+        for src, dst, et, rank, props in self.store.edges:
+            if wanted is not None and et not in wanted:
+                continue
+            touches = (direction in ("out", "both") and src in starts) or (
+                direction in ("in", "both") and dst in starts
+            )
+            if not touches:
+                continue
+            key = (et, src, dst, rank)
+            if key in seen:
+                continue
+            seen.add(key)
+            found.append(RawEdge(src=src, dst=dst, edge_type=et, rank=rank, properties=dict(props)))
+        return found
+
     def scan_vertices(self, tag: str, limit: int | None = None):
         result = [
             RawVertex(vid=vid, tags={tag: tags[tag]})

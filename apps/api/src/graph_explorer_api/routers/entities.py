@@ -2,8 +2,14 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
-from graph_explorer_api.dependencies import get_graph_service
+from graph_explorer_api.dependencies import get_graph_service, get_person_network_service
 from graph_explorer_api.services.graph_service import GraphService
+from graph_explorer_api.services.person_network_service import (
+    DEFAULT_MAX_FANOUT,
+    DEFAULT_MAX_PERSONS,
+    MAX_DEGREE,
+    PersonNetworkService,
+)
 
 router = APIRouter(prefix="/api/entities", tags=["entities"])
 
@@ -11,9 +17,12 @@ router = APIRouter(prefix="/api/entities", tags=["entities"])
 @router.get("/search")
 def search_entities(
     q: str = Query("", description="Search query"),
+    entity_type: str | None = Query(
+        None, description="Restrict to one tag, e.g. 'person'"
+    ),
     graph_service: GraphService = Depends(get_graph_service),
 ):
-    return graph_service.search_entities(q)
+    return graph_service.search_entities(q, entity_type=entity_type)
 
 
 @router.get("/{entity_id}")
@@ -34,6 +43,45 @@ def expand_entity_graph(
     graph_service: GraphService = Depends(get_graph_service),
 ):
     return graph_service.expand_node(entity_id=entity_id, depth=depth)
+
+
+@router.get("/{entity_id}/person-network")
+def person_network(
+    entity_id: str,
+    degree: int = Query(1, ge=1, le=MAX_DEGREE, description="Connection degree, not hops"),
+    connectors: str | None = Query(
+        None, description="Comma-separated edge types to treat as connections"
+    ),
+    max_fanout: int = Query(
+        DEFAULT_MAX_FANOUT,
+        ge=1,
+        le=500,
+        description="Skip a shared attribute held by more people than this",
+    ),
+    max_persons: int = Query(DEFAULT_MAX_PERSONS, ge=1, le=2000),
+    service: PersonNetworkService = Depends(get_person_network_service),
+):
+    network = service.person_network(
+        root_id=entity_id,
+        degree=degree,
+        connectors=connectors.split(",") if connectors else None,
+        max_fanout=max_fanout,
+        max_persons=max_persons,
+    )
+    if network is None:
+        raise HTTPException(status_code=404, detail="Person not found")
+    return network
+
+
+@router.get("/{entity_id}/attributes")
+def entity_attributes(
+    entity_id: str,
+    connectors: str | None = Query(None),
+    service: PersonNetworkService = Depends(get_person_network_service),
+):
+    return service.attributes(
+        entity_id, connectors=connectors.split(",") if connectors else None
+    )
 
 
 @router.get("/{entity_id}/risk")

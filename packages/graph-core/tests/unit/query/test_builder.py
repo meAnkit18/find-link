@@ -8,6 +8,7 @@ from graph_core.query.builder import (
     build_fetch_vertex,
     build_fetch_vertices,
     build_go_neighbors,
+    build_go_neighbors_batch,
     build_insert_edge,
     build_insert_edges,
     build_insert_vertex,
@@ -78,6 +79,38 @@ def test_build_go_neighbors_both_any_edge_type():
 def test_build_go_neighbors_rejects_bad_direction():
     with pytest.raises(ValueError):
         build_go_neighbors("v1", "owns", "sideways")
+
+
+def test_build_go_neighbors_batch_many_vids_and_edge_types():
+    ngql = build_go_neighbors_batch(["a", "b"], ["HAS_PHONE", "HAS_EMAIL"], "both")
+    assert ngql == (
+        'GO FROM "a", "b" OVER HAS_PHONE, HAS_EMAIL BIDIRECT YIELD DISTINCT edge AS e'
+    )
+
+
+def test_build_go_neighbors_batch_any_edge_type_out():
+    ngql = build_go_neighbors_batch(["a"], None, "out")
+    assert ngql == 'GO FROM "a" OVER * YIELD DISTINCT edge AS e'
+
+
+def test_build_go_neighbors_batch_empty_edge_types_means_any():
+    ngql = build_go_neighbors_batch(["a"], [], "in")
+    assert ngql == 'GO FROM "a" OVER * REVERSELY YIELD DISTINCT edge AS e'
+
+
+def test_build_go_neighbors_batch_requires_vids():
+    with pytest.raises(ValueError):
+        build_go_neighbors_batch([], ["HAS_PHONE"], "both")
+
+
+def test_build_go_neighbors_batch_rejects_bad_edge_type():
+    with pytest.raises(ValueError):
+        build_go_neighbors_batch(["a"], ["HAS-PHONE"], "both")
+
+
+def test_build_go_neighbors_batch_rejects_bad_direction():
+    with pytest.raises(ValueError):
+        build_go_neighbors_batch(["a"], None, "sideways")
 
 
 def test_build_count_neighbors():

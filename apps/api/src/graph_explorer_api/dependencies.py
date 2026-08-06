@@ -16,6 +16,7 @@ from graph_explorer_api.ingest.jobs import ImportJobRunner
 from graph_explorer_api.search.index import SearchIndex
 from graph_explorer_api.services.graph_service import GraphService
 from graph_explorer_api.services.investigation_service import InvestigationService
+from graph_explorer_api.services.person_network_service import PersonNetworkService
 
 
 def get_settings(request: Request) -> Settings:
@@ -44,6 +45,18 @@ def get_graph_service(request: Request) -> GraphService:
 
 def get_investigation_service(request: Request) -> InvestigationService:
     return request.app.state.investigation_service
+
+
+def get_person_network_service(request: Request) -> PersonNetworkService:
+    service = getattr(request.app.state, "person_network_service", None)
+    if service is None:
+        # Startup couldn't reach the intelligence space (see main.py's
+        # lifespan) — say so instead of failing with AttributeError.
+        raise HTTPException(
+            status_code=503,
+            detail="Intelligence graph unavailable — is NebulaGraph running?",
+        )
+    return service
 
 
 def get_graph_or_404(graph_id: str, registry: GraphRegistry) -> Graph:

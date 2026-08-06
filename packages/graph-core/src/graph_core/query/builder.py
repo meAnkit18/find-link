@@ -70,20 +70,31 @@ def build_delete_edge(edge_type: str, src: str, dst: str, rank: int) -> str:
     return f"DELETE EDGE {edge_type} {_format_vid(src)}->{_format_vid(dst)}@{rank}"
 
 
-def _build_over_clause(edge_type: str | None, direction: str) -> str:
+def _direction_suffix(direction: str) -> str:
     if direction not in ("out", "in", "both"):
         raise ValueError(f"direction must be 'out', 'in', or 'both', got {direction!r}")
+    if direction == "out":
+        return ""
+    if direction == "in":
+        return " REVERSELY"
+    return " BIDIRECT"
 
+
+def _format_edge_types(edge_types: list[str] | None) -> str:
+    """Comma-separated edge-type list for an OVER clause; '*' when empty."""
+    if not edge_types:
+        return "*"
+    for edge_type in edge_types:
+        validate_identifier(edge_type, "edge type")
+    return ", ".join(edge_types)
+
+
+def _build_over_clause(edge_type: str | None, direction: str) -> str:
     edge_clause = "*"
     if edge_type is not None:
         validate_identifier(edge_type, "edge type")
         edge_clause = edge_type
-
-    if direction == "out":
-        return f"OVER {edge_clause}"
-    if direction == "in":
-        return f"OVER {edge_clause} REVERSELY"
-    return f"OVER {edge_clause} BIDIRECT"
+    return f"OVER {edge_clause}{_direction_suffix(direction)}"
 
 
 def build_go_neighbors(vid: str, edge_type: str | None, direction: str) -> str:
@@ -187,6 +198,27 @@ def build_go_neighbors_with_edges(
     return (
         f"GO FROM {_format_vid(vid)} {over_clause} "
         f"YIELD DISTINCT id($$) AS id, edge AS e"
+    )
+
+
+def build_go_neighbors_batch(
+    vids: list[str], edge_types: list[str] | None = None, direction: str = "both"
+) -> str:
+    """One-hop expansion of many start vertices over many edge types at once.
+
+    Yields the traversed edges themselves (src/dst/type/rank/props all
+    decoded into RawEdge), which is what a caller reconstructing an
+    adjacency map needs — unlike build_go_neighbors_with_edges, this one
+    doesn't also hydrate the neighbor vertices, so the caller can batch that
+    FETCH across a whole BFS level instead of per start vertex.
+    """
+    if not vids:
+        raise ValueError("build_go_neighbors_batch requires at least one vid")
+    vid_list = ", ".join(_format_vid(vid) for vid in vids)
+    over_clause = _format_edge_types(edge_types)
+    return (
+        f"GO FROM {vid_list} OVER {over_clause}{_direction_suffix(direction)} "
+        f"YIELD DISTINCT edge AS e"
     )
 
 

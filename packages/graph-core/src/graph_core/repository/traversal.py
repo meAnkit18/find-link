@@ -15,6 +15,7 @@ from graph_core.query.builder import (
     build_count_neighbors,
     build_find_shortest_path,
     build_go_neighbors,
+    build_go_neighbors_batch,
     build_go_neighbors_with_edges,
     build_scan_vertices,
 )
@@ -69,6 +70,42 @@ class Traversal:
                 if isinstance(raw_v, RawVertex):
                     vertices.append(raw_v)
         return vertices, edges
+
+    def neighbors_batch(
+        self,
+        vids: list[str],
+        edge_types: list[str] | None = None,
+        direction: str = "both",
+        chunk_size: int = 200,
+    ) -> list[RawEdge]:
+        """Expand many start vertices one hop, in as few round trips as
+        possible, returning the traversed edges deduplicated on
+        (type, src, dst, rank).
+
+        This is the primitive a breadth-first expansion wants: get_neighbors*
+        run one query (or two) per start vertex, so a wide frontier costs
+        hundreds of round trips. Long vid lists are chunked because nGQL
+        statements are sent as a single string.
+        """
+        edges: list[RawEdge] = []
+        seen: set[tuple[str, str, str, int]] = set()
+        unique_vids = list(dict.fromkeys(vids))
+        for start in range(0, len(unique_vids), chunk_size):
+            chunk = unique_vids[start : start + chunk_size]
+            if not chunk:
+                continue
+            ngql = build_go_neighbors_batch(chunk, edge_types, direction)
+            result = self._executor.execute(ngql)
+            for row in result.rows:
+                raw_edge = row.get("e")
+                if not isinstance(raw_edge, RawEdge):
+                    continue
+                key = (raw_edge.edge_type, raw_edge.src, raw_edge.dst, raw_edge.rank)
+                if key in seen:
+                    continue
+                seen.add(key)
+                edges.append(raw_edge)
+        return edges
 
     def count_neighbors(
         self, vid: str, edge_type: str | None = None, direction: str = "out"
