@@ -109,6 +109,19 @@ const STYLE: StylesheetStyle[] = [
   },
 ]
 
+// cy.fit() scales until the content fills the viewport, which on a
+// three-node result means ~600% — labels the size of the canvas, and no
+// room left for the nodes an expansion is about to add. Cap it.
+const MAX_FIT_ZOOM = 1.6
+
+function fitToElements(cy: Core) {
+  cy.fit(undefined, 40)
+  if (cy.zoom() > MAX_FIT_ZOOM) {
+    cy.zoom(MAX_FIT_ZOOM)
+    cy.center()
+  }
+}
+
 /** If the graph has drifted entirely outside the viewport (the "black
  * screen"), bring it back into view; otherwise leave the camera alone. */
 function ensureGraphVisible(cy: Core) {
@@ -116,7 +129,23 @@ function ensureGraphVisible(cy: Core) {
   const bb = cy.nodes().boundingBox()
   const ext = cy.extent()
   const overlaps = bb.x1 < ext.x2 && bb.x2 > ext.x1 && bb.y1 < ext.y2 && bb.y2 > ext.y1
-  if (!overlaps) cy.fit(undefined, 40)
+  if (!overlaps) fitToElements(cy)
+}
+
+/** Re-frame when something the user just added landed outside the
+ * viewport — an attribute ring, or the extra people a higher degree pulled
+ * in. When the new nodes are already on screen the camera is left alone,
+ * so this never yanks the view out from under a manual pan or zoom. */
+function ensureAddedVisible(cy: Core, addedIds: string[]) {
+  if (addedIds.length === 0 || cy.nodes().length === 0) return
+  const ext = cy.extent()
+  const offscreen = addedIds.some((id) => {
+    const ele = cy.getElementById(id)
+    if (ele.empty()) return false
+    const { x, y } = ele.position()
+    return x < ext.x1 || x > ext.x2 || y < ext.y1 || y > ext.y2
+  })
+  if (offscreen) fitToElements(cy)
 }
 
 /** Shared fcose tuning for both the initial/incremental layout (data-sync
@@ -467,6 +496,8 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas(
     // (initial load, an expansion, a search hit). Re-showing filtered nodes
     // and toggling edge types keep the existing layout untouched, so the
     // graph no longer reshuffles on every filter click.
+    const addedIds = newNodeEles.map((ele) => String(ele.data.id))
+
     if (brandNewCount > 0) {
       const layout = layoutFreeNodes(cy, pinnedNodes, !hadNodesBefore)
       layout.one('layoutstop', () => {
@@ -475,13 +506,19 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas(
         cy.nodes().forEach((ele) => { positionsRef.current.set(ele.id(), { ...ele.position() }) })
         applyPinnedPositions(cy, pinnedNodes)
         onPositionsSettledRef.current?.(new Map(positionsRef.current))
-        if (!hadNodesBefore) cy.fit(undefined, 40)
-        else ensureGraphVisible(cy)
+        if (!hadNodesBefore) fitToElements(cy)
+        else {
+          ensureGraphVisible(cy)
+          ensureAddedVisible(cy, addedIds)
+        }
       })
       layout.run()
     } else {
       applyPinnedPositions(cy, pinnedNodes)
-      if (newNodeEles.length > 0 || newEdgeEles.length > 0) ensureGraphVisible(cy)
+      if (newNodeEles.length > 0 || newEdgeEles.length > 0) {
+        ensureGraphVisible(cy)
+        ensureAddedVisible(cy, addedIds)
+      }
     }
   }, [nodes, edges, mainTags, pinnedNodes])
 
