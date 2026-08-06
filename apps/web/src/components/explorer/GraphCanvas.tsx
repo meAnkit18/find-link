@@ -162,14 +162,14 @@ function ensureAddedVisible(cy: Core, addedIds: string[]) {
  * and fast, for the initial full-graph layout (randomize: true); incremental
  * layouts that keep already-placed nodes fixed (every reveal/expand click
  * after the first render) need "default" instead. */
-function fcoseLayoutOptions(randomize: boolean) {
+function fcoseLayoutOptions(randomize: boolean, spread = 1) {
   return {
     name: 'fcose',
     animate: false,
     quality: randomize ? 'draft' : 'default',
     fit: false,
-    nodeRepulsion: 12000,
-    idealEdgeLength: 130,
+    nodeRepulsion: 12000 * spread,
+    idealEdgeLength: 130 * spread,
     randomize,
   }
 }
@@ -181,9 +181,13 @@ function fcoseLayoutOptions(randomize: boolean) {
 function layoutFreeNodes(cy: Core, pinned: Map<string, cytoscape.Position>, randomize: boolean) {
   const free = pinned.size === 0 ? cy.nodes() : cy.nodes().filter((ele) => !pinned.has(ele.id()))
   const elements = free.union(free.edgesWith(free))
+  // Rings need somewhere to go: when children are pinned around these
+  // nodes, push the nodes themselves further apart so each has room for
+  // its own ring. Without pinned children this is the layout as it was.
+  const spread = pinned.size > 0 ? 2 : 1
   // fcose's options (animate/randomize/nodeRepulsion/...) aren't part of
   // @types/cytoscape's built-in layout typings, hence the cast.
-  return elements.layout(fcoseLayoutOptions(randomize) as unknown as cytoscape.LayoutOptions)
+  return elements.layout(fcoseLayoutOptions(randomize, spread) as unknown as cytoscape.LayoutOptions)
 }
 
 /** Move pinned nodes onto their given positions and lock them, so neither
@@ -269,6 +273,10 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas(
   // which both outlive any single render.
   const pinnedPositionsRef = useRef(pinnedNodes)
   pinnedPositionsRef.current = pinnedNodes
+  // Expanding a person needs room the current layout doesn't have, so the
+  // hub nodes are re-spread once per expansion. Tracked by count: a ring
+  // that only moved must not trigger another reflow, or this never settles.
+  const pinnedCountRef = useRef(0)
 
   const [popupInfo, setPopupInfo] = useState<GraphPopupInfo | null>(null)
   const [pinned, setPinned] = useState(false)
@@ -497,20 +505,37 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas(
     // and toggling edge types keep the existing layout untouched, so the
     // graph no longer reshuffles on every filter click.
     const addedIds = newNodeEles.map((ele) => String(ele.data.id))
+    const pinnedGrew = pinnedNodes.size > pinnedCountRef.current
+    pinnedCountRef.current = pinnedNodes.size
+
+    /** Cache where everything settled, re-seat the rings, and tell the
+     * caller — which lets it recompute rings against the new positions. */
+    const afterLayout = () => {
+      cy.nodes().forEach((ele) => { positionsRef.current.set(ele.id(), { ...ele.position() }) })
+      applyPinnedPositions(cy, pinnedNodes)
+      onPositionsSettledRef.current?.(new Map(positionsRef.current))
+    }
 
     if (brandNewCount > 0) {
       const layout = layoutFreeNodes(cy, pinnedNodes, !hadNodesBefore)
       layout.one('layoutstop', () => {
-        // Cache the settled positions of everything, then make sure the
-        // result is actually on screen.
-        cy.nodes().forEach((ele) => { positionsRef.current.set(ele.id(), { ...ele.position() }) })
-        applyPinnedPositions(cy, pinnedNodes)
-        onPositionsSettledRef.current?.(new Map(positionsRef.current))
+        afterLayout()
         if (!hadNodesBefore) fitToElements(cy)
         else {
           ensureGraphVisible(cy)
           ensureAddedVisible(cy, addedIds)
         }
+      })
+      layout.run()
+    } else if (pinnedGrew) {
+      // Someone's details just opened. Their ring is already placed from
+      // the old positions; re-spread the people so it has somewhere to go,
+      // then re-frame on the result.
+      applyPinnedPositions(cy, pinnedNodes)
+      const layout = layoutFreeNodes(cy, pinnedNodes, false)
+      layout.one('layoutstop', () => {
+        afterLayout()
+        fitToElements(cy)
       })
       layout.run()
     } else {

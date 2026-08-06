@@ -64,6 +64,46 @@ describe('computeRadialPositions', () => {
     }
   })
 
+  it('shrinks a ring so it cannot swallow a nearby person', () => {
+    const parents = new Map([['alice', origin]])
+    const children = Array.from({ length: 6 }, (_, i) => child(`c${i}`, ['alice']))
+    const bob = { x: 75, y: 0 }
+
+    const roomy = computeRadialPositions(parents, children)
+    const cramped = computeRadialPositions(parents, children, { obstacles: [origin, bob] })
+
+    const crampedRadius = distance(cramped.get('c0')!, origin)
+    expect(crampedRadius).toBeLessThan(distance(roomy.get('c0')!, origin))
+    // every child stays nearer to its own parent than Bob is
+    for (const p of cramped.values()) expect(distance(p, origin)).toBeLessThan(75)
+  })
+
+  it('does not shrink a ring below the minimum radius', () => {
+    const parents = new Map([['alice', origin]])
+    const crowded = { x: 12, y: 0 }
+
+    const positions = computeRadialPositions(
+      parents,
+      [child('a', ['alice']), child('b', ['alice'])],
+      { obstacles: [origin, crowded], minRadius: 30 },
+    )
+
+    for (const p of positions.values()) expect(distance(p, origin)).toBeCloseTo(30, 6)
+  })
+
+  it('ignores the parent’s own position when measuring clearance', () => {
+    const parents = new Map([['alice', origin]])
+    const children = [child('a', ['alice'])]
+
+    const withSelf = computeRadialPositions(parents, children, { obstacles: [origin] })
+    const withNone = computeRadialPositions(parents, children)
+
+    expect(distance(withSelf.get('a')!, origin)).toBeCloseTo(
+      distance(withNone.get('a')!, origin),
+      6,
+    )
+  })
+
   it('is stable across repeated calls', () => {
     const parents = new Map([['alice', { x: 12, y: -4 }]])
     const children = [child('phone', ['alice']), child('email', ['alice'])]

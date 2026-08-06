@@ -29,10 +29,20 @@ export interface RadialOptions {
   baseRadius?: number
   /** Minimum arc length between two neighbouring children. */
   spacing?: number
+  /** Floor for the radius once clearance has been applied. */
+  minRadius?: number
+  /** Positions the rings must stay clear of — the other people on the
+   * canvas. A ring is capped at a fraction of the distance to the nearest
+   * one so it never swallows a neighbour and their ring. */
+  obstacles?: Position[]
 }
 
 const DEFAULT_BASE_RADIUS = 90
 const DEFAULT_SPACING = 46
+const DEFAULT_MIN_RADIUS = 34
+/** How much of the gap to the nearest neighbour a ring may occupy. Below
+ * 0.5 so two adjacent people's rings can't touch. */
+const RING_CLEARANCE = 0.42
 
 /** Stable per-parent starting angle, so two nearby people's rings don't
  * line up and interleave. Same id always yields the same offset. */
@@ -62,6 +72,18 @@ function byOrder(a: RadialChild, b: RadialChild): number {
   return a.sortKey.localeCompare(b.sortKey) || a.id.localeCompare(b.id)
 }
 
+/** Distance to the closest obstacle, ignoring the parent's own position
+ * (which is in the obstacle list, at distance ~0). */
+function nearestObstacle(origin: Position, obstacles: Position[]): number | null {
+  let nearest: number | null = null
+  for (const point of obstacles) {
+    const distance = Math.hypot(point.x - origin.x, point.y - origin.y)
+    if (distance < 1) continue
+    if (nearest === null || distance < nearest) nearest = distance
+  }
+  return nearest
+}
+
 /**
  * Positions for every child with at least one expanded parent. Children
  * whose parents are all collapsed are omitted — the caller shouldn't be
@@ -74,6 +96,8 @@ export function computeRadialPositions(
 ): Map<string, Position> {
   const baseRadius = options.baseRadius ?? DEFAULT_BASE_RADIUS
   const spacing = options.spacing ?? DEFAULT_SPACING
+  const minRadius = options.minRadius ?? DEFAULT_MIN_RADIUS
+  const obstacles = options.obstacles ?? []
   const positions = new Map<string, Position>()
 
   const ownRing = new Map<string, RadialChild[]>()
@@ -95,8 +119,11 @@ export function computeRadialPositions(
     const origin = parents.get(parentId)!
     ring.sort(byOrder)
     // Grow the ring with its population so a person with 15 details doesn't
-    // pack them on top of each other.
-    const radius = Math.max(baseRadius, (ring.length * spacing) / (2 * Math.PI))
+    // pack them on top of each other — but never past the point where it
+    // would engulf the next person along.
+    let radius = Math.max(baseRadius, (ring.length * spacing) / (2 * Math.PI))
+    const nearest = nearestObstacle(origin, obstacles)
+    if (nearest !== null) radius = Math.min(radius, Math.max(minRadius, nearest * RING_CLEARANCE))
     const step = (2 * Math.PI) / ring.length
     const offset = startAngle(parentId)
     ring.forEach((child, index) => {

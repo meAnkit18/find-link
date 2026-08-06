@@ -83,10 +83,14 @@ export function InvestigationGraphPage() {
     [graph.attributeParents, graph.attributes],
   )
 
-  const pinnedPositions = useMemo(
-    () => computeRadialPositions(positions, radialChildren),
-    [positions, radialChildren],
-  )
+  const pinnedPositions = useMemo(() => {
+    // Every person is an obstacle: a ring must not grow so wide that it
+    // swallows the neighbour it sits next to.
+    const obstacles = [...graph.personsById.keys()]
+      .map((id) => positions.get(id))
+      .filter((p): p is Position => p != null)
+    return computeRadialPositions(positions, radialChildren, { obstacles })
+  }, [positions, radialChildren, graph.personsById])
 
   async function handleSearch() {
     if (!searchQuery.trim()) return
