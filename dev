@@ -1,0 +1,272 @@
+#!/usr/bin/env bash
+#
+# dev --- bring the whole stack (NebulaGraph + API + web) up or down with one
+# command.
+#
+#   ./dev            same as `./dev up`
+#   ./dev up         start everything, backgrounded; logs land in .dev/
+#   ./dev down       stop API + web, then `docker compose down` (data KEPT)
+#   ./dev down --wipe   ...and `-v`, which destroys the ingested graph
+#   ./dev restart    down, then up
+#   ./dev status     what is running right now
+#   ./dev logs [api|web|graph] [-f]
+#
+# Notes (see CLAUDE.md for the background):
+#   - the compose file lives in deploy/, not the repo root
+#   - the `console` service is a one-shot ADD HOSTS job; the API cannot create
+#     a space until it has logged "Storage host registered", so `up` waits for
+#     that rather than just for graphd to be healthy
+#   - memory is the binding constraint on this box, so `up` refuses to start
+#     blind and tells you what is actually free first
+#
+# Env overrides: API_PORT (8000), WEB_PORT (5173), API_RELOAD=1.
+
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+RUN_DIR="$ROOT/.dev"
+COMPOSE=(docker compose -f "$ROOT/deploy/docker-compose.yml")
+API_PORT="${API_PORT:-8000}"
+WEB_PORT="${WEB_PORT:-5173}"
+API_RELOAD="${API_RELOAD:-0}"
+
+if [[ -t 1 ]]; then
+  C_INFO=$'\033[1;34m'; C_OK=$'\033[1;32m'; C_WARN=$'\033[1;33m'
+  C_ERR=$'\033[1;31m'; C_DIM=$'\033[2m'; C_OFF=$'\033[0m'
+else
+  C_INFO=; C_OK=; C_WARN=; C_ERR=; C_DIM=; C_OFF=
+fi
+
+log()  { printf '%s==>%s %s\n' "$C_INFO" "$C_OFF" "$*"; }
+ok()   { printf '%s  ok%s %s\n' "$C_OK" "$C_OFF" "$*"; }
+warn() { printf '%s  !!%s %s\n' "$C_WARN" "$C_OFF" "$*" >&2; }
+die()  { printf '%s  xx%s %s\n' "$C_ERR" "$C_OFF" "$*" >&2; exit 1; }
+
+# --- small helpers -----------------------------------------------------------
+
+port_busy() { (exec 3<>"/dev/tcp/127.0.0.1/$1") 2>/dev/null; }
+
+pid_of()    { [[ -f "$RUN_DIR/$1.pid" ]] && cat "$RUN_DIR/$1.pid" 2>/dev/null; }
+pid_alive() { local p; p=$(pid_of "$1") && [[ -n $p ]] && kill -0 "$p" 2>/dev/null; }
+
+# Kill a process and everything it spawned (npm -> vite, uvicorn -> reloader).
+kill_tree() {
+  local pid=$1 sig=${2:-TERM} child
+  for child in $(pgrep -P "$pid" 2>/dev/null || true); do
+    kill_tree "$child" "$sig"
+  done
+  kill -"$sig" "$pid" 2>/dev/null || true
+}
+
+# start_bg <name> <workdir> <cmd...> --- run detached, remember the pid.
+start_bg() {
+  local name=$1 dir=$2
+  shift 2
+  ( cd "$dir" && exec nohup "$@" ) >"$RUN_DIR/$name.log" 2>&1 &
+  printf '%s\n' "$!" >"$RUN_DIR/$name.pid"
+}
+
+# wait_until <label> <timeout_s> <cmd...>
+wait_until() {
+  local label=$1 timeout=$2
+  shift 2
+  local waited=0
+  printf '%s    %s' "$C_DIM" "waiting for $label"
+  until "$@" >/dev/null 2>&1; do
+    if (( waited >= timeout )); then
+      printf ' timed out%s\n' "$C_OFF"
+      return 1
+    fi
+    printf '.'
+    sleep 1
+    waited=$(( waited + 1 ))
+  done
+  printf ' ready (%ss)%s\n' "$waited" "$C_OFF"
+}
+
+tail_log() { printf '%s\n' "--- last 20 lines of $1 ---"; tail -n 20 "$1" || true; }
+
+graphd_healthy() {
+  local cid
+  cid=$("${COMPOSE[@]}" ps -q graphd 2>/dev/null) || return 1
+  [[ -n $cid ]] || return 1
+  [[ "$(docker inspect -f '{{.State.Health.Status}}' "$cid" 2>/dev/null)" == healthy ]]
+}
+
+# `console` is one-shot and gets restarted (not recreated) by `compose up`, so
+# its log still holds the previous run's success line. Read only from this
+# run's start, otherwise a stale line lets the API race ahead of ADD HOSTS.
+hosts_registered() {
+  local cid started
+  cid=$("${COMPOSE[@]}" ps -aq console 2>/dev/null) || return 1
+  [[ -n $cid ]] || return 1
+  started=$(docker inspect -f '{{.State.StartedAt}}' "$cid" 2>/dev/null) || return 1
+  docker logs --since "$started" "$cid" 2>&1 | grep -q 'Storage host registered'
+}
+
+api_ready() { curl -fsS -o /dev/null "http://127.0.0.1:$API_PORT/openapi.json"; }
+web_ready() { port_busy "$WEB_PORT"; }
+
+# --- preflight ---------------------------------------------------------------
+
+preflight() {
+  command -v docker >/dev/null || die "docker not found on PATH"
+  docker info >/dev/null 2>&1 || die "docker daemon not reachable (start it, or add yourself to the docker group)"
+  command -v curl >/dev/null || die "curl not found on PATH (needed to probe the API)"
+  command -v npm  >/dev/null || die "npm not found on PATH"
+  [[ -x "$ROOT/.venv/bin/uvicorn" ]] || die ".venv/bin/uvicorn missing --- run 'uv sync' in $ROOT first"
+
+  if [[ ! -f "$ROOT/.env" ]]; then
+    cp "$ROOT/.env.example" "$ROOT/.env"
+    warn "no .env --- copied .env.example. Fill in LLM_API_KEY / HF_TOKEN before ingesting."
+  fi
+
+  # Memory is the real constraint here; the containers alone cap at ~1.4GB.
+  local avail
+  avail=$(awk '/MemAvailable/ {print int($2/1024)}' /proc/meminfo 2>/dev/null || echo 0)
+  if (( avail > 0 && avail < 900 )); then
+    warn "only ${avail}MB RAM available --- NebulaGraph will lean hard on swap."
+  else
+    ok "${avail}MB RAM available"
+  fi
+
+  if [[ ! -d "$ROOT/apps/web/node_modules" ]]; then
+    log "installing web dependencies (first run)"
+    ( cd "$ROOT/apps/web" && npm install )
+  fi
+
+  if [[ "$API_PORT" != "8000" ]]; then
+    warn "API_PORT=$API_PORT but apps/web/vite.config.ts proxies /api to :8000 --- the UI will not reach the API."
+  fi
+}
+
+# --- commands ----------------------------------------------------------------
+
+cmd_up() {
+  mkdir -p "$RUN_DIR"
+  preflight
+
+  if pid_alive api && pid_alive web && api_ready; then
+    ok "already up --- http://localhost:$WEB_PORT"
+    return 0
+  fi
+
+  log "starting NebulaGraph"
+  "${COMPOSE[@]}" up -d
+  wait_until "graphd" 120 graphd_healthy \
+    || { "${COMPOSE[@]}" logs --tail 20 graphd; die "graphd never became healthy"; }
+  wait_until "storage host registration" 120 hosts_registered \
+    || { "${COMPOSE[@]}" logs --tail 20 console; die "console never registered storaged0 --- see README for the manual ADD HOSTS"; }
+
+  log "starting API on :$API_PORT"
+  if pid_alive api; then
+    ok "already running (pid $(pid_of api))"
+  else
+    port_busy "$API_PORT" && die "port $API_PORT is already taken by something else"
+    local uvicorn_args=(
+      "$ROOT/.venv/bin/uvicorn" graph_explorer_api.main:app
+      --port "$API_PORT" --app-dir "$ROOT/apps/api/src"
+    )
+    [[ "$API_RELOAD" == "1" ]] && uvicorn_args+=(--reload)
+    start_bg api "$ROOT" "${uvicorn_args[@]}"
+    wait_until "API" 120 api_ready \
+      || { tail_log "$RUN_DIR/api.log"; die "API did not come up"; }
+  fi
+
+  log "starting web on :$WEB_PORT"
+  if pid_alive web; then
+    ok "already running (pid $(pid_of web))"
+  else
+    port_busy "$WEB_PORT" && die "port $WEB_PORT is already taken by something else"
+    start_bg web "$ROOT/apps/web" npm run dev -- --port "$WEB_PORT" --strictPort
+    wait_until "web" 90 web_ready \
+      || { tail_log "$RUN_DIR/web.log"; die "vite did not come up"; }
+  fi
+
+  printf '\n'
+  ok "UI      http://localhost:$WEB_PORT"
+  ok "API     http://localhost:$API_PORT/docs"
+  ok "logs    ./dev logs api|web|graph   (files in .dev/)"
+  ok "stop    ./dev down"
+}
+
+stop_proc() {
+  local name=$1 pid
+  pid=$(pid_of "$name") || true
+  if [[ -n ${pid:-} ]] && kill -0 "$pid" 2>/dev/null; then
+    log "stopping $name (pid $pid)"
+    kill_tree "$pid" TERM
+    local waited=0
+    while kill -0 "$pid" 2>/dev/null && (( waited < 10 )); do
+      sleep 1
+      waited=$(( waited + 1 ))
+    done
+    kill -0 "$pid" 2>/dev/null && kill_tree "$pid" KILL
+    ok "$name stopped"
+  else
+    printf '%s    %s not running%s\n' "$C_DIM" "$name" "$C_OFF"
+  fi
+  rm -f "$RUN_DIR/$name.pid"
+}
+
+cmd_down() {
+  local wipe=0
+  [[ "${1:-}" == "--wipe" ]] && wipe=1
+
+  stop_proc web
+  stop_proc api
+
+  if docker info >/dev/null 2>&1; then
+    if (( wipe )); then
+      warn "wiping graph volumes (--wipe)"
+      "${COMPOSE[@]}" down -v
+    else
+      log "stopping NebulaGraph (data kept)"
+      "${COMPOSE[@]}" down
+    fi
+  else
+    warn "docker not reachable --- skipped compose teardown"
+  fi
+  ok "everything is down"
+}
+
+cmd_status() {
+  local pid
+  for name in api web; do
+    if pid_alive "$name"; then
+      pid=$(pid_of "$name")
+      ok "$name    running (pid $pid)"
+    else
+      printf '%s    %-6s stopped%s\n' "$C_DIM" "$name" "$C_OFF"
+    fi
+  done
+  port_busy "$API_PORT" && ok "port $API_PORT open" || printf '%s    port %s closed%s\n' "$C_DIM" "$API_PORT" "$C_OFF"
+  port_busy "$WEB_PORT" && ok "port $WEB_PORT open" || printf '%s    port %s closed%s\n' "$C_DIM" "$WEB_PORT" "$C_OFF"
+  printf '\n'
+  docker info >/dev/null 2>&1 && "${COMPOSE[@]}" ps || warn "docker not reachable"
+}
+
+cmd_logs() {
+  local target=${1:-api} follow=${2:-}
+  case "$target" in
+    graph|nebula|db)
+      if [[ "$follow" == "-f" ]]; then "${COMPOSE[@]}" logs -f; else "${COMPOSE[@]}" logs --tail 50; fi ;;
+    api|web)
+      local f="$RUN_DIR/$target.log"
+      [[ -f "$f" ]] || die "no log at $f --- has it been started?"
+      if [[ "$follow" == "-f" ]]; then tail -f "$f"; else tail -n 50 "$f"; fi ;;
+    *) die "unknown log target '$target' (api|web|graph)" ;;
+  esac
+}
+
+usage() { sed -n '3,20p' "$ROOT/dev" | sed 's/^# \{0,1\}//'; }
+
+case "${1:-up}" in
+  up)      cmd_up ;;
+  down)    shift; cmd_down "$@" ;;
+  restart) shift; cmd_down "$@"; cmd_up ;;
+  status)  cmd_status ;;
+  logs)    shift; cmd_logs "$@" ;;
+  -h|--help|help) usage ;;
+  *)       die "unknown command '$1' --- try: ./dev [up|down|restart|status|logs]" ;;
+esac

@@ -119,7 +119,16 @@ architecture and rationale.
 - `apps/web/` — Vite + React + TypeScript frontend (Cytoscape.js graph
   canvas). See `apps/web/README.md`.
 
-Quick start once NebulaGraph is up (`docker compose up -d`):
+Quick start — one command for all three tiers (graph, API, web):
+
+    ./dev            # start everything; waits for each layer, logs to .dev/
+    ./dev down       # stop everything (graph data kept; --wipe to reset)
+    ./dev status     # what's running
+    ./dev logs web -f
+
+It assumes dependencies are installed (`uv sync`, and it runs `npm install`
+for the frontend on first use). To run the tiers by hand instead, once
+NebulaGraph is up (`cd deploy && docker compose up -d`):
 
     pip install -e ".[dev]"                 # graph-core
     pip install -e "apps/api[dev]"          # backend

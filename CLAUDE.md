@@ -6,6 +6,14 @@ The full stack does run on this machine — verified 2026-08-07. Ask before
 starting it, since it's a shared box and NebulaGraph is memory-hungry, and
 tear it down when you're done.
 
+    ./dev            # NebulaGraph + API + web, backgrounded
+    ./dev down       # stop all three (graph data kept)
+    ./dev status     # what's running
+    ./dev logs api   # or web / graph; add -f to follow
+
+`./dev` waits for each layer before starting the next and prints where the
+logs went; it wraps the manual sequence, which is still:
+
     cd deploy && docker compose up -d     # NebulaGraph; wait for healthy
     # the `console` service is a one-shot ADD HOSTS job — wait for
     # "Storage host registered" in its log before the API can create a space
