@@ -31,11 +31,17 @@ export function riskColor(level: string): string {
 }
 
 function viaText(via: PersonLinkVia): string {
-  // Only a shared_attribute is something the two people have in common; the
-  // other kinds carry a ready sentence, and rendering them as "company: X"
-  // would claim they share X when they don't.
+  // Only a shared_attribute or a shared_field is something the two people
+  // have in common; the other kinds carry a ready sentence, and rendering
+  // them as "company: X" would claim they share X when they don't.
   if (via.kind === 'shared_attribute') {
     return `${via.connector_tag.replace(/_/g, ' ')}: ${via.connector_label}`
+  }
+  if (via.kind === 'shared_field') {
+    const keys = via.same_key
+      ? via.field_key.replace(/_/g, ' ')
+      : via.field_keys.map((k) => k.replace(/_/g, ' ')).join(' ↔ ')
+    return `matching ${keys}: “${via.connector_label}”`
   }
   return via.label
 }
@@ -322,6 +328,26 @@ export function InvestigationGraphPage() {
             <option value={3}>3 degrees</option>
           </select>
         </label>
+        <label className="row" style={{ gap: 'var(--space-2)' }}>
+          <span className="muted">Min confidence</span>
+          <InfoTooltip text="How sure the link has to be before it counts. A value only these two people share scores high; one that forty people share scores near zero. Raising this also hides people you could only reach through a weak link." />
+          <input
+            type="range"
+            min={0}
+            max={1}
+            step={0.05}
+            value={minConfidence}
+            onChange={(e) => setMinConfidence(Number(e.target.value))}
+            // One request per drag, not one per step.
+            onPointerUp={() => {
+              if (rootId) void loadNetwork(rootId, degree, { preserveExpanded: true })
+            }}
+            aria-label="Minimum link confidence"
+          />
+          <span className="muted" style={{ width: 32 }}>
+            {minConfidence.toFixed(2)}
+          </span>
+        </label>
       </div>
 
       {(status || searchError || graph.error) && (
@@ -461,6 +487,7 @@ export function InvestigationGraphPage() {
                           <button className="link-button" onClick={() => setSelectedVid(otherId)}>
                             {other?.label ?? otherId}
                           </button>
+                          <span className="muted"> · {link.confidence.toFixed(2)}</span>
                           <div className="mono muted">
                             {link.via.map(viaText).join(' · ')}
                           </div>

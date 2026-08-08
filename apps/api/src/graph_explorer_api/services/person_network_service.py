@@ -345,6 +345,7 @@ class PersonNetworkService:
         owners: dict[str, set[str]] = defaultdict(set)
         owner_edge_types: dict[tuple[str, str], set[str]] = defaultdict(set)
         owner_field_keys: dict[tuple[str, str], set[str]] = defaultdict(set)
+        owner_documents: dict[tuple[str, str], set[str]] = defaultdict(set)
         for edge in owners_edges:
             for connector, person in ((edge.src, edge.dst), (edge.dst, edge.src)):
                 if connector in connector_set and is_person(person):
@@ -354,6 +355,9 @@ class PersonNetworkService:
                         field_key = str(edge.properties.get("field_key") or "").strip()
                         if field_key:
                             owner_field_keys[(connector, person)].add(field_key)
+                        document = str(edge.properties.get("document_id") or "").strip()
+                        if document:
+                            owner_documents[(connector, person)].add(document)
 
         for connector, connected in owners.items():
             vertex = vertices.get(connector)
@@ -397,6 +401,12 @@ class PersonNetworkService:
                             "field_keys": all_keys,
                             "same_key": same_key,
                             "edge_types": [FIELD_VALUE_EDGE],
+                            # Which documents on each side stated the value,
+                            # so the reason is auditable back to its source.
+                            "document_ids": sorted(
+                                owner_documents[(connector, first)]
+                                | owner_documents[(connector, second)]
+                            ),
                             "confidence": match_confidence(field_key, len(connected), same_key),
                         })
                 for member in members:

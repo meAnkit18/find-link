@@ -141,6 +141,9 @@ export type PersonLinkVia =
       field_keys: string[]
       same_key: boolean
       edge_types: string[]
+      /** The documents on each side that stated the value, so a reason is
+       * auditable back to its source. */
+      document_ids: string[]
       confidence: number
     }
   /** Two people at *different* organisations that are themselves related —

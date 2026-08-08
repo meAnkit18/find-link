@@ -796,3 +796,22 @@ def test_expanding_a_person_never_leaks_index_vertices(person_with_everything):
     """field_value vertices are an index, not something to draw."""
     result = person_with_everything.attributes("a")
     assert all(a["tag"] != "field_value" for a in result["attributes"])
+
+
+def test_matching_field_names_the_source_documents():
+    """A reason has to be auditable back to the document that stated it."""
+    service = make_service(
+        {
+            "a": person("Alice"),
+            "b": person("Bob"),
+            "value:father": value_node("ahmed"),
+        },
+        [
+            ("a", "value:father", FIELD_VALUE,
+             {"field_key": "father_name", "document_id": "doc:a"}),
+            ("b", "value:father", FIELD_VALUE,
+             {"field_key": "father_name", "document_id": "doc:b"}),
+        ],
+    )
+    via = service.person_network("a", degree=1)["links"][0]["via"][0]
+    assert via["document_ids"] == ["doc:a", "doc:b"]
