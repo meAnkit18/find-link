@@ -9,7 +9,9 @@ Three changes to how the person network is built and shown:
    Emirates ID, and whatever document types arrive later) — never a
    placeholder for a document the graph doesn't have. Phone, email, bank
    account and vehicle vertices stop being rendered.
-2. **Clicking a document sub-node shows that document's full field set.**
+2. **Clicking a document sub-node shows that document's full field set**, in
+   the right-hand detail panel. Nothing expands inline on the canvas: the
+   graph shows structure, the panel shows detail.
 3. **Connections between people are inferred from matching field values
    across their documents**, scored with a confidence number, and
    traversable to degree 1/2/3 — default 1, expandable in place.
@@ -217,9 +219,23 @@ which is the behaviour an investigator expects from a confidence filter.
   into the rendered graph rather than replacing it, so the user's existing
   view and camera survive the expansion.
 - Confidence rendered as edge thickness/opacity, with a min-confidence
-  slider wired to the API param. Selecting a link shows its explanation —
-  which field matched, what the value was, which documents it came from.
-- `PropertiesList.tsx` is reused unchanged for a selected document's fields.
+  slider wired to the API param.
+- **All detail lands in the right-hand panel**, which already exists: a
+  resizable, width-persisting column (`useResizablePanel`, storage key
+  `investigation.detailPanelWidth`) that already renders `PropertiesList`
+  for a selected person (`InvestigationPage.tsx:479`) and a selected
+  attribute (`:510`). Three selection cases feed it, and nothing else:
+  - **person selected** — identity fields, plus the list of their documents.
+  - **document sub-node selected** — that document's full field set, via
+    `PropertiesList` unchanged; the `:510` attribute branch becomes the
+    document branch.
+  - **link selected** — the explanation: which field matched, what the value
+    was, which documents on each side it came from, and the confidence.
+
+  The canvas itself never renders a property list, a tooltip card, or an
+  inline expansion. Clicking a person still *reveals its document sub-nodes
+  on the canvas* — that is graph structure, not detail — while the fields
+  themselves appear only in the panel.
 
 ## 7. Testing
 
