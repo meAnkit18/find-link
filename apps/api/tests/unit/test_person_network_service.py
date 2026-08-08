@@ -707,3 +707,46 @@ def test_field_values_chain_into_second_degree():
     )
     assert degrees(service.person_network("a", degree=2)) == {"a": 0, "b": 1, "c": 2}
     assert "c" not in ids(service.person_network("a", degree=1))
+
+
+# ------------------------------------------------------- confidence filter
+
+
+@pytest.fixture
+def weak_then_strong():
+    """A-B is a weak city match; B-C is a strong passport-number match."""
+    people = {f"p{i}": person(f"P{i}") for i in range(6)}
+    return make_service(
+        {
+            **people,
+            "a": person("Alice"),
+            "value:city": value_node("dubai"),
+            "value:pp": value_node("p1234567"),
+        },
+        [
+            ("a", "value:city", FIELD_VALUE, {"field_key": "city"}),
+            *[(f"p{i}", "value:city", FIELD_VALUE, {"field_key": "city"}) for i in range(6)],
+            ("p0", "value:pp", FIELD_VALUE, {"field_key": "passport_number"}),
+        ],
+    )
+
+
+def test_weak_links_survive_a_zero_threshold(weak_then_strong):
+    network = weak_then_strong.person_network("a", degree=1, min_confidence=0.0)
+    assert ("a", "p0") in link_pairs(network)
+
+
+def test_min_confidence_drops_weak_links(weak_then_strong):
+    network = weak_then_strong.person_network("a", degree=1, min_confidence=0.5)
+    assert link_pairs(network) == set()
+
+
+def test_a_dropped_link_is_not_a_stepping_stone(weak_then_strong):
+    """A confidence filter has to cut the path, not just hide one edge."""
+    network = weak_then_strong.person_network("a", degree=2, min_confidence=0.5)
+    assert ids(network) == ["a"]
+
+
+def test_min_confidence_keeps_strong_links(shared_father_name):
+    network = shared_father_name.person_network("a", degree=1, min_confidence=0.5)
+    assert link_pairs(network) == {("a", "b")}

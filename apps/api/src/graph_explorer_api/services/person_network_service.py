@@ -118,6 +118,7 @@ class PersonNetworkService:
         root_id: str,
         degree: int = 1,
         connectors: list[str] | None = None,
+        min_confidence: float = 0.0,
         max_fanout: int = DEFAULT_MAX_FANOUT,
         max_persons: int = DEFAULT_MAX_PERSONS,
     ) -> dict | None:
@@ -144,7 +145,15 @@ class PersonNetworkService:
                 break
             found = self._expand_level(frontier, set(persons), edges, max_fanout)
             suppressed.update(found.suppressed_hubs)
+
+            # Filtering before the frontier is built is what makes the
+            # threshold cut the path rather than just hide one edge: a person
+            # only reachable through a link too weak to show is not reachable.
+            reachable: set[str] = set()
             for key, via in found.links.items():
+                if _link_confidence(via) < min_confidence:
+                    continue
+                reachable.update(key)
                 link = links.get(key)
                 if link is None:
                     links[key] = {
@@ -158,7 +167,7 @@ class PersonNetworkService:
 
             next_frontier: list[str] = []
             for vid in sorted(found.persons):
-                if vid in persons:
+                if vid in persons or vid not in reachable:
                     continue
                 if len(persons) >= max_persons:
                     truncated = True
@@ -178,6 +187,7 @@ class PersonNetworkService:
         return {
             "root_id": root_id,
             "degree": degree,
+            "min_confidence": min_confidence,
             "persons": sorted(persons.values(), key=lambda p: (p["degree"], p["label"])),
             "links": sorted(kept_links, key=lambda link: (link["degree"], link["source"])),
             "truncated": truncated,

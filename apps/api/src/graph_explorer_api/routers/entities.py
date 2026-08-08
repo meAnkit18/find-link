@@ -69,6 +69,9 @@ def person_network(
     connectors: str | None = Query(
         None, description="Comma-separated edge types to treat as connections"
     ),
+    min_confidence: float = Query(
+        0.0, ge=0.0, le=1.0, description="Drop links scoring below this confidence"
+    ),
     max_fanout: int = Query(
         DEFAULT_MAX_FANOUT,
         ge=1,
@@ -82,6 +85,7 @@ def person_network(
         root_id=entity_id,
         degree=degree,
         connectors=connectors.split(",") if connectors else None,
+        min_confidence=min_confidence,
         max_fanout=max_fanout,
         max_persons=max_persons,
     )
