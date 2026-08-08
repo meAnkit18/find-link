@@ -5,6 +5,7 @@ import time
 from typing import Any
 
 from graph_core.client import GraphClient
+from intelligence_schema.field_index import field_values, value_vid
 from intelligence_schema.ingest_schema import ENTITY_TAG, KEY_COLUMN
 
 
@@ -104,6 +105,41 @@ class GraphWriter:
             f':({float(confidence)}, {now});'
         )
         self._client.execute_raw(ngql)
+
+    # ------------------------------------------------------- field index
+
+    def index_field_values(
+        self, owner_vid: str, props: dict[str, Any] | None,
+        document_id: str | None = None, document_type: str | None = None,
+    ) -> int:
+        """Index a property bag's values against the person who holds them.
+
+        Values are attached to the *person*, not the document, so two people
+        who agree on a value are two hops apart — the same shape as two
+        people sharing a phone, which the projection already walks. The
+        originating document rides along on the edge so an explanation can
+        still name it.
+
+        Returns the number of values indexed.
+        """
+        pairs = field_values(props)
+        now = int(time.time())
+        for field_key, normalized in pairs:
+            vid = value_vid(normalized)
+            self._client.execute_raw(
+                f'INSERT VERTEX field_value(label, entity_type, value, created_at) '
+                f'VALUES {self._ngql_value(vid)}:('
+                f'{self._ngql_value(normalized)}, {self._ngql_value("field_value")}, '
+                f'{self._ngql_value(normalized)}, {now});'
+            )
+            self._client.execute_raw(
+                f'INSERT EDGE HAS_FIELD_VALUE('
+                f'field_key, document_id, document_type, created_at) VALUES '
+                f'{self._ngql_value(str(owner_vid))}->{self._ngql_value(vid)}:('
+                f'{self._ngql_value(field_key)}, {self._ngql_value(document_id or "")}, '
+                f'{self._ngql_value(document_type or "")}, {now});'
+            )
+        return len(pairs)
 
     # ------------------------------------------------------------ traversal
 
