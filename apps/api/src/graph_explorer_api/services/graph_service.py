@@ -10,6 +10,11 @@ from graph_explorer_api.services.entity_props import merged_properties
 # record or an internal watchlist entry hanging off the entity it concerns.
 FLAG_TAGS = frozenset({"sanction_entry", "watchlist_entry"})
 
+# Storage that exists to make matching possible, not things a user can look
+# for. `field_value` holds one vertex per distinct indexed value, so scanning
+# it would offer raw values ("dubai") as if they were entities.
+NON_ENTITY_TAGS = frozenset({"field_value"})
+
 
 class GraphService:
     def __init__(self, clients: GraphClientCache, space: str) -> None:
@@ -31,7 +36,11 @@ class GraphService:
         # Scan the whole tag: SearchIndex already does a full scan per tag,
         # and capping at 100 made this search silently miss entities,
         # disagreeing with the Explorer page's search results.
-        tags = [entity_type] if entity_type else self.client.metadata.list_tags()
+        tags = (
+            [entity_type]
+            if entity_type
+            else [t for t in self.client.metadata.list_tags() if t not in NON_ENTITY_TAGS]
+        )
         lowered = query_str.lower()
         results: list[dict] = []
         for tag in tags:
