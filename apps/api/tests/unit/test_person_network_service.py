@@ -495,7 +495,9 @@ def test_attributes_lists_a_persons_own_details(shared_phone):
             "tag": "phone",
             "label": "+91-111",
             "edge_type": "HAS_PHONE",
-            "properties": {"label": "+91-111", "entity_type": "Phone"},
+            # `label` is dropped: it is already this attribute's title, so a
+            # property row repeating it is noise. See _INTERNAL_PROPS.
+            "properties": {"entity_type": "Phone"},
             "shared_with": ["b"],
         }
     ]
@@ -530,3 +532,56 @@ def test_attributes_are_sorted_stably():
     )
     tags = [a["tag"] for a in service.attributes("a")["attributes"]]
     assert tags == ["address", "email", "phone"]
+
+
+# ------------------------------------------------------- property unpacking
+
+
+def test_props_json_blob_is_unpacked_into_real_fields():
+    """Entity attributes live in one JSON `props` string column, so without
+    unpacking the panel would show an opaque blob instead of the fields."""
+    service = make_service(
+        {
+            "a": {
+                "person": {
+                    "label": "Alice",
+                    "entity_type": "Person",
+                    "props": '{"nationality": "India", "dob": "1988-11-18"}',
+                }
+            }
+        },
+        [],
+    )
+    props = service.person_network("a", degree=1)["persons"][0]["properties"]
+    assert props["nationality"] == "India"
+    assert props["dob"] == "1988-11-18"
+    assert "props" not in props
+
+
+def test_storage_plumbing_is_hidden_from_properties():
+    service = make_service(
+        {
+            "a": {
+                "person": {
+                    "label": "Alice",
+                    "entity_type": "Person",
+                    "props": '{"aliases": [], "nationality": "India"}',
+                    "evidence_ids": '["ev-1"]',
+                    "created_at": 1754500000,
+                    "updated_at": 1754500000,
+                }
+            }
+        },
+        [],
+    )
+    props = service.person_network("a", degree=1)["persons"][0]["properties"]
+    assert props == {"entity_type": "Person", "nationality": "India"}
+
+
+def test_unparseable_props_does_not_break_the_payload():
+    service = make_service(
+        {"a": {"person": {"label": "Alice", "entity_type": "Person", "props": "not json"}}},
+        [],
+    )
+    network = service.person_network("a", degree=1)
+    assert network["persons"][0]["properties"] == {"entity_type": "Person"}

@@ -5,6 +5,7 @@ import { api } from '../api/client'
 import type { SearchResult } from '../api/types'
 import { useExplorerStore } from '../store/explorerStore'
 import { useGraphCanvasState } from '../hooks/useGraphCanvasState'
+import { useResizablePanel } from '../hooks/useResizablePanel'
 import GraphCanvas, { type GraphCanvasHandle } from '../components/explorer/GraphCanvas'
 import GraphControls from '../components/explorer/GraphControls'
 import SearchBar from '../components/explorer/SearchBar'
@@ -19,6 +20,20 @@ export default function ExplorerPage() {
   const [zoom, setZoom] = useState(1)
   const [isFullscreen, setIsFullscreen] = useState(false)
   const canvasRef = useRef<GraphCanvasHandle>(null)
+  const filterPanel = useResizablePanel({
+    defaultWidth: 220,
+    min: 180,
+    max: 400,
+    storageKey: 'explorer.filterPanelWidth',
+    side: 'left',
+  })
+  const detailPanel = useResizablePanel({
+    defaultWidth: 320,
+    min: 260,
+    max: 560,
+    storageKey: 'explorer.detailPanelWidth',
+    side: 'right',
+  })
 
   const {
     selectedVid,
@@ -133,7 +148,7 @@ export default function ExplorerPage() {
   }
 
   return (
-    <main className="page page--flush explorer graph-dark">
+    <main className="page page--flush explorer">
       <div className="explorer-topbar">
         <div className="row">
           <Link to="/">← All graphs</Link>
@@ -148,17 +163,31 @@ export default function ExplorerPage() {
 
       <div className="explorer-layout">
         {schemaQuery.data && (
-          <div className="explorer-filter-panel">
-            <FilterPanel
-              schema={schemaQuery.data}
-              hiddenTags={hiddenTags}
-              hiddenEdgeTypes={hiddenEdgeTypes}
-              mainTags={mainTags}
-              onToggleTag={toggleTag}
-              onToggleEdgeType={toggleEdgeType}
-              onToggleMainTag={toggleMainTag}
-            />
-          </div>
+          <>
+            <div
+              className="explorer-filter-panel"
+              style={filterPanel.isDesktop ? { width: filterPanel.width } : undefined}
+            >
+              <FilterPanel
+                schema={schemaQuery.data}
+                hiddenTags={hiddenTags}
+                hiddenEdgeTypes={hiddenEdgeTypes}
+                mainTags={mainTags}
+                onToggleTag={toggleTag}
+                onToggleEdgeType={toggleEdgeType}
+                onToggleMainTag={toggleMainTag}
+              />
+            </div>
+            {filterPanel.isDesktop && (
+              <div
+                className="resize-handle"
+                role="separator"
+                aria-orientation="vertical"
+                aria-label="Resize filter panel"
+                {...filterPanel.handleProps}
+              />
+            )}
+          </>
         )}
 
         <div className="card explorer-canvas">
@@ -231,17 +260,31 @@ export default function ExplorerPage() {
         </div>
 
         {graphId && selectedVid && (
-          <div className="explorer-detail-panel">
-            <NodeDetailPanel
-              graphId={graphId}
-              vid={selectedVid}
-              isExpanded={expandedVids.has(selectedVid)}
-              isExpanding={expandingVids.has(selectedVid)}
-              onExpand={() => void expandNode(selectedVid)}
-              onCollapse={() => collapseNode(selectedVid)}
-              onClose={() => select(null)}
-            />
-          </div>
+          <>
+            {detailPanel.isDesktop && (
+              <div
+                className="resize-handle"
+                role="separator"
+                aria-orientation="vertical"
+                aria-label="Resize detail panel"
+                {...detailPanel.handleProps}
+              />
+            )}
+            <div
+              className="explorer-detail-panel"
+              style={detailPanel.isDesktop ? { width: detailPanel.width } : undefined}
+            >
+              <NodeDetailPanel
+                graphId={graphId}
+                vid={selectedVid}
+                isExpanded={expandedVids.has(selectedVid)}
+                isExpanding={expandingVids.has(selectedVid)}
+                onExpand={() => void expandNode(selectedVid)}
+                onCollapse={() => collapseNode(selectedVid)}
+                onClose={() => select(null)}
+              />
+            </div>
+          </>
         )}
       </div>
     </main>

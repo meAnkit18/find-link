@@ -2,7 +2,11 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
-from graph_explorer_api.dependencies import get_graph_service, get_person_network_service
+from graph_explorer_api.dependencies import (
+    get_graph_service,
+    get_optional_person_network_service,
+    get_person_network_service,
+)
 from graph_explorer_api.services.graph_service import GraphService
 from graph_explorer_api.services.person_network_service import (
     DEFAULT_MAX_FANOUT,
@@ -101,10 +105,13 @@ def entity_attributes(
 def get_entity_risk(
     entity_id: str,
     graph_service: GraphService = Depends(get_graph_service),
+    person_network: PersonNetworkService | None = Depends(
+        get_optional_person_network_service
+    ),
 ):
     from graph_explorer_api.services.risk_service import RiskService
 
-    risk_service = RiskService(graph_service)
+    risk_service = RiskService(graph_service, person_network=person_network)
     return risk_service.calculate_for_entity(entity_id)
 
 
@@ -112,13 +119,16 @@ def get_entity_risk(
 def explain_entity_risk(
     entity_id: str,
     graph_service: GraphService = Depends(get_graph_service),
+    person_network: PersonNetworkService | None = Depends(
+        get_optional_person_network_service
+    ),
 ):
     from graph_explorer_api.services.explanation_service import (
         InvestigationExplanationService,
     )
     from graph_explorer_api.services.risk_service import RiskService
 
-    risk_service = RiskService(graph_service)
+    risk_service = RiskService(graph_service, person_network=person_network)
     risk = risk_service.calculate_for_entity(entity_id)
     explanation_service = InvestigationExplanationService()
     return explanation_service.explain_risk(risk)

@@ -4,8 +4,6 @@ import {
   AlertTriangle,
   Bot,
   Briefcase,
-  ChevronLeft,
-  ChevronRight,
   ListChecks,
   Network,
   ScanSearch,
@@ -38,14 +36,19 @@ const TECHNICAL_NAV = [
 ]
 
 function App() {
-  const [isCollapsed, setIsCollapsed] = useState(false)
+  const [isExpanded, setIsExpanded] = useState(false)
 
   return (
     <div className="app-shell">
-      <header className={`sidebar ${isCollapsed ? 'sidebar--collapsed' : ''}`}>
+      <div className="sidebar-rail" />
+      <header
+        className={`sidebar ${isExpanded ? '' : 'sidebar--collapsed'}`}
+        onMouseEnter={() => setIsExpanded(true)}
+        onMouseLeave={() => setIsExpanded(false)}
+      >
         <NavLink to="/" className="sidebar__brand">
           <span className="sidebar__logo">FL</span>
-          {!isCollapsed && <span className="sidebar__brand-name">FindLink</span>}
+          <span className="sidebar__brand-name">FindLink</span>
         </NavLink>
         <nav className="sidebar__nav">
           {NAV.map((item) => (
@@ -53,49 +56,38 @@ function App() {
               key={item.to}
               to={item.to}
               end={item.end}
-              title={isCollapsed ? item.label : undefined}
+              title={item.label}
               className={({ isActive }) =>
                 `sidebar__link ${isActive ? 'sidebar__link--active' : ''}`
               }
             >
               <item.icon className="sidebar__link-icon" size={16} />
-              {!isCollapsed && <span>{item.label}</span>}
+              <span className="sidebar__link-label">{item.label}</span>
             </NavLink>
           ))}
         </nav>
 
         <div className="sidebar__divider" />
-        {!isCollapsed && (
-          <div className="sidebar__section-label">
-            Technical tools
-            <InfoTooltip text="Advanced pages for developers to test the system directly — not needed for everyday investigation work." />
-          </div>
-        )}
+        <div className="sidebar__section-label">
+          Technical tools
+          <InfoTooltip text="Advanced pages for developers to test the system directly — not needed for everyday investigation work." />
+        </div>
         <nav className="sidebar__nav">
           {TECHNICAL_NAV.map((item) => (
             <NavLink
               key={item.to}
               to={item.to}
-              title={isCollapsed ? item.label : undefined}
+              title={item.label}
               className={({ isActive }) =>
                 `sidebar__link sidebar__link--muted ${isActive ? 'sidebar__link--active' : ''}`
               }
             >
               <item.icon className="sidebar__link-icon" size={16} />
-              {!isCollapsed && <span>{item.label}</span>}
+              <span className="sidebar__link-label">{item.label}</span>
             </NavLink>
           ))}
         </nav>
       </header>
-      <button
-        type="button"
-        className={`sidebar__toggle ${isCollapsed ? 'sidebar__toggle--collapsed' : ''}`}
-        onClick={() => setIsCollapsed((value) => !value)}
-        aria-label={isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-        title={isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-      >
-        {isCollapsed ? <ChevronRight size={14} /> : <ChevronLeft size={14} />}
-      </button>
       <div className="app-main">
         <Routes>
           <Route path="/" element={<GraphsListPage />} />

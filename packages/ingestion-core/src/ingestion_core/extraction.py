@@ -28,7 +28,12 @@ RELATIONSHIP TYPES (use exactly these): {_REL_TYPES}
 Rules:
 - Give every entity a local_id like "e1", "e2", ...
 - "name" is the primary surface form. Put everything else in "attributes"
-  (dob, nationality, number, address components, iban, plate, role, dates...).
+  (dob, nationality, national_id, number, address components, iban, plate,
+  role, dates...).
+- A person's government-issued ID number (Emirates ID, national ID, SSN, ...)
+  goes in attributes.national_id — NOT as a separate entity. (Passport
+  numbers are the one exception: they get their own Passport entity plus a
+  HAS_PASSPORT relationship.)
 - Deduplicate WITHIN this text: the same real-world thing appears once.
 - Relationships reference entities by local_id only.
 - confidence is 0.0-1.0: how certain you are given the text.

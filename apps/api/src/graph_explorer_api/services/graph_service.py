@@ -4,6 +4,11 @@ from graph_core.client import GraphClient
 from graph_core.merge import MergePlan
 from graph_core.storage.serialization import to_ngql_literal
 from graph_explorer_api.graph_clients import GraphClientCache
+from graph_explorer_api.services.entity_props import merged_properties
+
+# Vertex tags that mean "this entity is listed somewhere" — a sanctions
+# record or an internal watchlist entry hanging off the entity it concerns.
+FLAG_TAGS = frozenset({"sanction_entry", "watchlist_entry"})
 
 
 class GraphService:
@@ -152,3 +157,61 @@ class GraphService:
         context["neighbors"] = expanded.get("nodes", [])
         context["edges"] = expanded.get("edges", [])
         return context
+
+    def get_entity_context(self, entity_id: str) -> dict:
+        """The entity and everything one hop from it, in two queries.
+
+        Risk scoring asks several questions of the same neighbourhood — is
+        this entity listed, what is its nationality, what does its own file
+        say, what does it transfer — and one hop is the honest range for all
+        of them: a listing or a country two hops out belongs to somebody
+        else. Fetching once and answering from that keeps scoring cheap
+        enough to run on a click.
+        """
+        edges = self.client.traversal.neighbors_batch([entity_id], None, "both")
+        neighbour_ids = ({e.src for e in edges} | {e.dst for e in edges}) - {entity_id}
+        by_id = {
+            vertex.vid: vertex
+            for vertex in self.client.vertices.get_many_raw(
+                sorted(neighbour_ids | {entity_id})
+            )
+        }
+        own = by_id.pop(entity_id, None)
+        return {
+            "properties": merged_properties(own) if own is not None else {},
+            "neighbors": [
+                {
+                    "id": vertex.vid,
+                    "tags": frozenset(vertex.tags),
+                    "properties": merged_properties(vertex),
+                }
+                for vertex in by_id.values()
+            ],
+            "edge_types": [edge.edge_type for edge in edges],
+        }
+
+    def find_listed_entities(self) -> dict[str, list[str]]:
+        """Entity id -> the sanctions/watchlist records naming it.
+
+        Driven from the listings (of which there are few) rather than asked
+        of each person in a network (of which there are many), so the cost
+        tracks the size of the watchlists, not the size of the graph.
+        """
+        listing_ids: list[str] = []
+        for tag in sorted(FLAG_TAGS):
+            try:
+                listing_ids += [v.vid for v in self.client.traversal.scan_vertices(tag)]
+            except Exception:
+                continue  # this space has no such tag — nothing listed on it
+        if not listing_ids:
+            return {}
+
+        listings = set(listing_ids)
+        named: dict[str, list[str]] = {}
+        for edge in self.client.traversal.neighbors_batch(listing_ids, None, "both"):
+            for listing, entity in ((edge.src, edge.dst), (edge.dst, edge.src)):
+                if listing in listings and entity not in listings:
+                    entry = named.setdefault(entity, [])
+                    if listing not in entry:
+                        entry.append(listing)
+        return named

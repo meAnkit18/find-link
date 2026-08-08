@@ -84,11 +84,11 @@ function makeTextTexture(text: string, ink: string): { tex: THREE.CanvasTexture;
   canvas.height = Math.ceil(h * dpr)
   const ctx = canvas.getContext('2d')!
   ctx.scale(dpr, dpr)
-  ctx.fillStyle = 'rgba(6,9,16,0.55)'
+  ctx.fillStyle = 'rgba(255,255,255,0.85)'
   roundRectPath(ctx, 0.75, 0.75, w - 1.5, h - 1.5, h / 2)
   ctx.fill()
   ctx.lineWidth = 1
-  ctx.strokeStyle = 'rgba(255,255,255,0.08)'
+  ctx.strokeStyle = 'rgba(15,23,42,0.12)'
   roundRectPath(ctx, 0.75, 0.75, w - 1.5, h - 1.5, h / 2)
   ctx.stroke()
   ctx.font = font
@@ -137,6 +137,21 @@ const GraphCanvas3D = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas3
   const wrapRef = useRef<HTMLDivElement>(null)
   const selectedVidRef = useRef(selectedVid)
   selectedVidRef.current = selectedVid
+
+  // react-force-graph-3d has no ResizeObserver of its own — left to its
+  // defaults it reads the container's size once and never adapts, so a
+  // window resize, a fullscreen toggle, or a dragged panel splitter leaves
+  // it stale (cropped or with dead space) until the next full remount.
+  const [size, setSize] = useState<{ width: number; height: number } | null>(null)
+  useEffect(() => {
+    const el = wrapRef.current
+    if (!el) return
+    const update = () => setSize({ width: el.clientWidth, height: el.clientHeight })
+    update()
+    const resizeObserver = new ResizeObserver(update)
+    resizeObserver.observe(el)
+    return () => resizeObserver.disconnect()
+  }, [])
 
   const [labelsOn, setLabelsOn] = useState(true)
   const labelsRef = useRef(labelsOn)
@@ -272,28 +287,6 @@ const GraphCanvas3D = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas3
     [],
   )
 
-  // A soft global bloom so every node/edge gets a gentle glow, matching
-  // kindred's graph-3d.tsx (much subtler than the halo below).
-  useEffect(() => {
-    const fg = fgRef.current
-    if (!fg) return
-    let cancelled = false
-    import('three/examples/jsm/postprocessing/UnrealBloomPass.js')
-      .then(({ UnrealBloomPass }) => {
-        if (cancelled) return
-        try {
-          const bloom = new UnrealBloomPass(undefined as unknown as THREE.Vector2, 0.38, 0.5, 0.18)
-          fg.postProcessingComposer().addPass(bloom)
-        } catch {
-          // best-effort — a missing bloom pass shouldn't break the graph
-        }
-      })
-      .catch(() => {})
-    return () => {
-      cancelled = true
-    }
-  }, [])
-
   // dispose GPU textures on unmount
   useEffect(
     () => () => {
@@ -391,14 +384,16 @@ const GraphCanvas3D = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas3
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', width: '100%', height: '100%' }}>
-      <div ref={wrapRef} style={{ position: 'relative', flex: 1, minHeight: 0, background: '#05070d' }}>
+      <div ref={wrapRef} style={{ position: 'relative', flex: 1, minHeight: 0, background: '#eef0f4' }}>
         <ForceGraph3D<Node3D, Link3D>
         ref={fgRef}
         graphData={graphData}
-        backgroundColor="#05070d"
+        width={size?.width}
+        height={size?.height}
+        backgroundColor="#eef0f4"
         rendererConfig={{ preserveDrawingBuffer: true }}
         nodeId="id"
-        nodeColor={(node) => (node.id === selectedVid ? '#ffffff' : node.color)}
+        nodeColor={(node) => (node.id === selectedVid ? SELECT_COLOR : node.color)}
         nodeVal="val"
         nodeRelSize={4}
         nodeOpacity={0.92}
@@ -443,7 +438,7 @@ const GraphCanvas3D = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas3
       />
       <button
         className={`pill-btn${labelsOn ? ' pill-btn--active' : ''}`}
-        style={{ position: 'absolute', top: 12, left: 12, zIndex: 10, border: '1px solid rgba(255,255,255,0.1)', background: labelsOn ? undefined : 'rgba(255,255,255,0.06)' }}
+        style={{ position: 'absolute', top: 12, left: 12, zIndex: 10, border: '1px solid rgba(15,23,42,0.12)', background: labelsOn ? undefined : 'rgba(255,255,255,0.85)' }}
         onClick={() => setLabelsOn((v) => !v)}
       >
         Labels {labelsOn ? 'on' : 'off'}

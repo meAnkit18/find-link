@@ -20,6 +20,7 @@ from typing import Callable, NamedTuple
 from graph_core.client import GraphClient
 from graph_core.storage.result import RawEdge, RawVertex
 from graph_explorer_api.graph_clients import GraphClientCache
+from graph_explorer_api.services.entity_props import merged_properties
 
 PERSON_TAG = "person"
 
@@ -502,10 +503,7 @@ def _primary_tag(vertex: RawVertex) -> str:
 
 
 def _merged_properties(vertex: RawVertex) -> dict:
-    merged: dict = {}
-    for props in vertex.tags.values():
-        merged.update(props)
-    return merged
+    return merged_properties(vertex)
 
 
 def _label_of(vertex: RawVertex, fallback: str) -> str:

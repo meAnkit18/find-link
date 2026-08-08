@@ -50,6 +50,13 @@ def normalize_passport_number(raw: str) -> str:
     return re.sub(r"[\s\-]", "", raw).upper()
 
 
+def normalize_national_id(raw: str) -> str:
+    """Strip formatting from a government-issued ID number (e.g. an Emirates
+    ID's 784-YYYY-XXXXXXX-C), so the same person's ID matches whether or not
+    a document rendered the separators."""
+    return re.sub(r"[\s\-]", "", raw).upper()
+
+
 def normalize_iban(raw: str) -> str:
     return re.sub(r"\s", "", raw).upper()
 
@@ -64,6 +71,12 @@ def normalize_person_name(raw: str) -> str:
 
 def deterministic_key(entity: ExtractedEntity) -> str | None:
     t, attrs = entity.type.value, entity.attributes
+    if t == "Person":
+        raw = attrs.get("national_id")
+        if raw:
+            v = normalize_national_id(str(raw))
+            if v:
+                return f"national_id:{v}"
     if t == "Email":
         v = normalize_email(attrs.get("address") or entity.name)
         return f"email:{v}" if v else None
@@ -100,6 +113,8 @@ def normalize_extraction(result: ExtractionResult) -> ExtractionResult:
             if dob := attrs.get("dob"):
                 if norm := normalize_date(str(dob)):
                     attrs["dob"] = norm
+            if nid := attrs.get("national_id"):
+                attrs["national_id"] = normalize_national_id(str(nid))
         elif t == "Phone":
             norm = normalize_phone(attrs.get("number") or ent.name)
             if norm is None:
