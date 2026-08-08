@@ -29,13 +29,24 @@ Notes:
   this box usually has well under 1GB genuinely free, so it leans on swap.
   Check `free -h` first and prefer `docker compose down` (without `-v`) when
   you're finished — `-v` wipes the ingested graph data.
-- Spaces persist in Docker volumes across runs, but they are close to empty
-  — as of 2026-08-08, `intel_kg_v2` has no people at all, and
-  `intelligence_graph` (the space the API actually uses by default, via
-  `NEBULA_SPACE`) has 2 people and 0 documents. Don't assume there is real
-  data to test against: anything that needs a populated graph needs seeding
-  first, and a "it works against live data" check on this box proves very
-  little.
+- **The space the API uses comes from `.env`, not the process environment.**
+  `main.py` calls `load_dotenv(override=True)`, so `NEBULA_SPACE=... ./dev`
+  is silently ignored — edit `.env` instead. Standalone scripts under
+  `scripts/` do *not* load `.env`, so they fall back to the
+  `intelligence_graph` default and will happily talk to a different space
+  than the running API unless you pass `--space`.
+- Spaces persist in Docker volumes across runs, but they start empty.
+  `demo_graph` is the working dataset; seed or re-seed it with:
+
+      .venv/bin/python scripts/seed_demo_graph.py --space demo_graph
+
+  It is idempotent (fixed vids, INSERT overwrites), and it writes through
+  the same GraphWriter calls ingestion makes, so what lands is what real
+  ingestion would produce — including the field-value index the person
+  projection walks. `scripts/reindex_field_values.py` rebuilds just that
+  index when the matching rules change.
+- `test_evidence_pipeline_e2e.py` writes to the real NebulaGraph, so running
+  the suite can leave residue in whatever space `.env` points at.
 - Frontend-only is still fine for pure UI work and needs none of the above.
 
 Note: `origin` is configured over HTTPS with no credential helper, so a plain `git push` fails here. There's a working SSH deploy key at `~/ankit_kumar/github_connect/ankit_kumar` (pub key registered to meAnkit18) — push with:
