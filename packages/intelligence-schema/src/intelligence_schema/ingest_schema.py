@@ -33,7 +33,7 @@ ENTITY_TAG: dict[str, str] = {
     "Organization": "organization",
     "Address": "address",
     "Country": "country",
-    "Passport": "passport",
+    "Document": "document",
     "Phone": "phone",
     "Email": "email",
     "BankAccount": "bank_account",
@@ -43,7 +43,7 @@ ENTITY_TAG: dict[str, str] = {
 # Per-tag identifier column (matches GraphWriter._EXTRA_COLUMN)
 KEY_COLUMN: dict[str, str] = {
     "country": "iso2",
-    "passport": "number",
+    "document": "number",
     "phone": "number",
     "email": "address",
     "bank_account": "iban",
@@ -52,7 +52,7 @@ KEY_COLUMN: dict[str, str] = {
 
 # Every relationship type the extractor can emit (ingestion_core.canonical)
 INGEST_EDGE_TYPES: list[str] = [
-    "WORKS_AT", "OWNS", "PAYS", "HAS_PASSPORT", "HAS_PHONE", "HAS_EMAIL",
+    "WORKS_AT", "OWNS", "PAYS", "HAS_DOCUMENT", "HAS_PHONE", "HAS_EMAIL",
     "HAS_ACCOUNT", "OWNS_VEHICLE", "LOCATED_AT", "CITIZEN_OF", "RELATED_TO",
 ]
 
@@ -116,12 +116,31 @@ def ensure_ingest_schema(client, space: str) -> None:
             PropertyDefinition("created_at", "int64", nullable=True),
         ]))
 
+        # The field-value index. `value` is the normalised value itself, kept
+        # readable so a link explanation can say what actually matched.
+        client.metadata.create_tag(TagSchema(name="field_value", properties=[
+            PropertyDefinition("label", "string"),
+            PropertyDefinition("entity_type", "string"),
+            PropertyDefinition("value", "string", nullable=True),
+            PropertyDefinition("created_at", "int64", nullable=True),
+        ]))
+
         for edge in INGEST_EDGE_TYPES:
             client.metadata.create_edge_type(
                 EdgeSchema(name=edge, properties=list(_UNIFORM_EDGE_PROPS))
             )
         client.metadata.create_edge_type(EdgeSchema(name="SUPPORTED_BY", properties=[
             PropertyDefinition("extraction_confidence", "double", nullable=True),
+            PropertyDefinition("created_at", "int64", nullable=True),
+        ]))
+
+        # person -> field_value. `field_key` is which field on that person's
+        # document held the value, and is what separates a same-key match
+        # from a cross-key one when the projection scores the link.
+        client.metadata.create_edge_type(EdgeSchema(name="HAS_FIELD_VALUE", properties=[
+            PropertyDefinition("field_key", "string", nullable=True),
+            PropertyDefinition("document_id", "string", nullable=True),
+            PropertyDefinition("document_type", "string", nullable=True),
             PropertyDefinition("created_at", "int64", nullable=True),
         ]))
 
