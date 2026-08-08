@@ -69,6 +69,7 @@ export function InvestigationGraphPage() {
   const [rootId, setRootId] = useState<string | null>(null)
   const [selectedVid, setSelectedVid] = useState<string | null>(null)
   const [degree, setDegree] = useState(1)
+  const [minConfidence, setMinConfidence] = useState(0)
   const [zoom, setZoom] = useState(1)
   const [isFullscreen, setIsFullscreen] = useState(false)
   const [risk, setRisk] = useState<RiskResult | null>(null)
@@ -149,11 +150,22 @@ export function InvestigationGraphPage() {
     }
   }
 
-  async function loadNetwork(personId: string, nextDegree: number) {
+  async function loadNetwork(
+    personId: string,
+    nextDegree: number,
+    opts?: { preserveExpanded?: boolean },
+  ) {
     setStatus(`Finding connections within ${nextDegree} degree${nextDegree === 1 ? '' : 's'}…`)
-    const result = await graph.loadNetwork(personId, nextDegree)
-    setPositions(new Map())
-    setManualOffsets(new Map())
+    const result = await graph.loadNetwork(personId, nextDegree, {
+      minConfidence,
+      preserveExpanded: opts?.preserveExpanded,
+    })
+    // Widening the same question keeps the layout the user is reading; only
+    // a new root starts the canvas over.
+    if (!opts?.preserveExpanded) {
+      setPositions(new Map())
+      setManualOffsets(new Map())
+    }
     setStatus(
       result
         ? `${result.persons.length - 1} connected ${
@@ -173,7 +185,7 @@ export function InvestigationGraphPage() {
 
   async function handleDegreeChange(next: number) {
     setDegree(next)
-    if (rootId) await loadNetwork(rootId, next)
+    if (rootId) await loadNetwork(rootId, next, { preserveExpanded: true })
   }
 
   function isPerson(vid: string): boolean {

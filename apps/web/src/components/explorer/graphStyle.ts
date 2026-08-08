@@ -45,6 +45,14 @@ export function edgeWeight(edge: GraphEdge): number {
   return Number.isFinite(count) && count > 0 ? count : 1
 }
 
+/** How confident the projection is in this link, 0-1. Investigation's
+ * person links carry it; anything else is treated as certain, because a
+ * stored edge is an assertion rather than an inference. */
+export function edgeConfidence(edge: GraphEdge): number {
+  const confidence = Number(edge.properties?.confidence)
+  return Number.isFinite(confidence) ? Math.min(1, Math.max(0, confidence)) : 1
+}
+
 /** Prefer the human-readable relationship label captured at ingestion
  * (stored as the `relationship_type` edge property) over the raw edge
  * type code, e.g. "childhood friend" instead of "RELATED_TO". */
