@@ -489,18 +489,33 @@ def test_isolated_person_returns_just_themselves():
 # -------------------------------------------------------------- attributes
 
 
-def test_attributes_lists_a_persons_own_details(shared_phone):
-    result = shared_phone.attributes("a")
+def test_attributes_lists_a_persons_own_details():
+    """Expanding a person shows their documents — a phone is still ingested
+    and still forms links, but it is not what a person opens into."""
+    service = make_service(
+        {
+            "a": person("Alice"),
+            "b": person("Bob"),
+            "doc:1": thing("document", "P1234567"),
+            "phone:1": thing("phone", "+91-111"),
+        },
+        [
+            ("a", "doc:1", "HAS_DOCUMENT"),
+            ("b", "doc:1", "HAS_DOCUMENT"),
+            ("a", "phone:1", "HAS_PHONE"),
+        ],
+    )
+    result = service.attributes("a")
     assert result["entity_id"] == "a"
     assert result["attributes"] == [
         {
-            "id": "phone:1",
-            "tag": "phone",
-            "label": "+91-111",
-            "edge_type": "HAS_PHONE",
+            "id": "doc:1",
+            "tag": "document",
+            "label": "P1234567",
+            "edge_type": "HAS_DOCUMENT",
             # `label` is dropped: it is already this attribute's title, so a
             # property row repeating it is noise. See _INTERNAL_PROPS.
-            "properties": {"entity_type": "Phone"},
+            "properties": {"entity_type": "Document"},
             "shared_with": ["b"],
         }
     ]
@@ -508,10 +523,10 @@ def test_attributes_lists_a_persons_own_details(shared_phone):
 
 def test_attributes_excludes_other_people():
     service = make_service(
-        {"a": person("Alice"), "b": person("Bob"), "phone:1": thing("phone", "+91-111")},
-        [("a", "b", "RELATED_TO"), ("a", "phone:1", "HAS_PHONE")],
+        {"a": person("Alice"), "b": person("Bob"), "doc:1": thing("document", "P1234567")},
+        [("a", "b", "RELATED_TO"), ("a", "doc:1", "HAS_DOCUMENT")],
     )
-    assert [a["id"] for a in service.attributes("a")["attributes"]] == ["phone:1"]
+    assert [a["id"] for a in service.attributes("a")["attributes"]] == ["doc:1"]
 
 
 def test_attributes_of_a_person_with_none_is_empty():
@@ -523,18 +538,18 @@ def test_attributes_are_sorted_stably():
     service = make_service(
         {
             "a": person("Alice"),
-            "phone:1": thing("phone", "+91-111"),
-            "email:1": thing("email", "a@example.com"),
-            "address:1": thing("address", "12 Main St"),
+            "doc:pp": thing("document", "P1234567"),
+            "doc:eid": thing("document", "784199012345671"),
+            "doc:dl": thing("document", "DL-99"),
         },
         [
-            ("a", "phone:1", "HAS_PHONE"),
-            ("a", "email:1", "HAS_EMAIL"),
-            ("a", "address:1", "LOCATED_AT"),
+            ("a", "doc:pp", "HAS_DOCUMENT"),
+            ("a", "doc:eid", "HAS_DOCUMENT"),
+            ("a", "doc:dl", "HAS_DOCUMENT"),
         ],
     )
-    tags = [a["tag"] for a in service.attributes("a")["attributes"]]
-    assert tags == ["address", "email", "phone"]
+    labels = [a["label"] for a in service.attributes("a")["attributes"]]
+    assert labels == ["784199012345671", "DL-99", "P1234567"]
 
 
 # ------------------------------------------------------- property unpacking
@@ -750,3 +765,34 @@ def test_a_dropped_link_is_not_a_stepping_stone(weak_then_strong):
 def test_min_confidence_keeps_strong_links(shared_father_name):
     network = shared_father_name.person_network("a", degree=1, min_confidence=0.5)
     assert link_pairs(network) == {("a", "b")}
+
+
+# ------------------------------------------------------- person expansion
+
+
+@pytest.fixture
+def person_with_everything():
+    return make_service(
+        {
+            "a": person("Alice"),
+            "doc:1": thing("document", "P1234567"),
+            "phone:1": thing("phone", "+91-111"),
+            "value:1": value_node("ahmed"),
+        },
+        [
+            ("a", "doc:1", "HAS_DOCUMENT"),
+            ("a", "phone:1", "HAS_PHONE"),
+            ("a", "value:1", FIELD_VALUE, {"field_key": "father_name"}),
+        ],
+    )
+
+
+def test_expanding_a_person_yields_only_documents(person_with_everything):
+    result = person_with_everything.attributes("a")
+    assert [a["tag"] for a in result["attributes"]] == ["document"]
+
+
+def test_expanding_a_person_never_leaks_index_vertices(person_with_everything):
+    """field_value vertices are an index, not something to draw."""
+    result = person_with_everything.attributes("a")
+    assert all(a["tag"] != "field_value" for a in result["attributes"])

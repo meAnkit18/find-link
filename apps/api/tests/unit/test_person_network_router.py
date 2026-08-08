@@ -20,16 +20,16 @@ def service():
         {
             "a": {"person": {"label": "Alice", "entity_type": "Person"}},
             "b": {"person": {"label": "Bob", "entity_type": "Person"}},
-            "phone:1": {"phone": {"label": "+91-111", "entity_type": "Phone"}},
+            "doc:1": {"document": {"label": "P1234567", "entity_type": "Document"}},
         }
     )
     store.edges.extend(
         [
-            ("a", "phone:1", "HAS_PHONE", 0, {}),
-            ("b", "phone:1", "HAS_PHONE", 0, {}),
+            ("a", "doc:1", "HAS_DOCUMENT", 0, {}),
+            ("b", "doc:1", "HAS_DOCUMENT", 0, {}),
         ]
     )
-    store.edge_types["HAS_PHONE"] = object()
+    store.edge_types["HAS_DOCUMENT"] = object()
     return PersonNetworkService(clients, SPACE)
 
 
@@ -46,7 +46,7 @@ def test_person_network_returns_the_projection(api):
     assert response.status_code == 200
     body = response.json()
     assert [p["id"] for p in body["persons"]] == ["a", "b"]
-    assert body["links"][0]["label"] == "shared phone"
+    assert body["links"][0]["label"] == "shared document"
 
 
 def test_person_network_404s_on_an_unknown_person(api):
@@ -54,7 +54,7 @@ def test_person_network_404s_on_an_unknown_person(api):
 
 
 def test_person_network_404s_on_a_non_person(api):
-    assert api.get("/api/entities/phone:1/person-network").status_code == 404
+    assert api.get("/api/entities/doc:1/person-network").status_code == 404
 
 
 def test_person_network_rejects_a_degree_above_three(api):
@@ -72,7 +72,7 @@ def test_person_network_accepts_an_explicit_connector_list(api):
 
 def test_attributes_endpoint_returns_shared_details(api):
     body = api.get("/api/entities/a/attributes").json()
-    assert body["attributes"][0]["id"] == "phone:1"
+    assert body["attributes"][0]["id"] == "doc:1"
     assert body["attributes"][0]["shared_with"] == ["b"]
 
 

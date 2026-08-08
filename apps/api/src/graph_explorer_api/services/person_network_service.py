@@ -213,7 +213,9 @@ class PersonNetworkService:
         candidate_ids = _endpoints(own_edges) - {entity_id}
         vertices = self._fetch_vertices(sorted(candidate_ids))
         connector_ids = [
-            vid for vid, vertex in vertices.items() if PERSON_TAG not in vertex.tags
+            vid
+            for vid, vertex in vertices.items()
+            if PERSON_TAG not in vertex.tags and _primary_tag(vertex) in EXPANDABLE_TAGS
         ]
 
         edge_type_by_connector: dict[str, str] = {}
