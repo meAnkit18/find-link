@@ -110,8 +110,11 @@ def test_degree_one_link_carries_the_shared_attribute_as_its_reason(shared_phone
             "connector_tag": "phone",
             "connector_label": "+91-111",
             "edge_types": ["HAS_PHONE"],
+            # weight_for("phone") == 0.8, rarity(2) == 1.0
+            "confidence": pytest.approx(0.8),
         }
     ]
+    assert link["confidence"] == pytest.approx(0.8)
 
 
 def test_degree_one_stops_at_one_connection(chain):
@@ -585,3 +588,122 @@ def test_unparseable_props_does_not_break_the_payload():
     )
     network = service.person_network("a", degree=1)
     assert network["persons"][0]["properties"] == {"entity_type": "Person"}
+
+
+# --------------------------------------------------------- field matching
+
+
+FIELD_VALUE = "HAS_FIELD_VALUE"
+
+
+def value_node(value: str) -> dict:
+    return {"field_value": {"label": value, "entity_type": "field_value"}}
+
+
+@pytest.fixture
+def shared_father_name():
+    """A and B have separate passports naming the same father."""
+    return make_service(
+        {
+            "a": person("Alice"),
+            "b": person("Bob"),
+            "value:father": value_node("ahmed al-mansouri"),
+        },
+        [
+            ("a", "value:father", FIELD_VALUE, {"field_key": "father_name"}),
+            ("b", "value:father", FIELD_VALUE, {"field_key": "father_name"}),
+        ],
+    )
+
+
+def test_matching_field_links_two_people(shared_father_name):
+    network = shared_father_name.person_network("a", degree=1)
+    assert set(ids(network)) == {"a", "b"}
+    assert link_pairs(network) == {("a", "b")}
+
+
+def test_matching_field_link_reports_why(shared_father_name):
+    network = shared_father_name.person_network("a", degree=1)
+    via = network["links"][0]["via"][0]
+    assert via["kind"] == "shared_field"
+    assert via["field_key"] == "father_name"
+    assert via["same_key"] is True
+    assert via["connector_label"] == "ahmed al-mansouri"
+
+
+def test_same_key_match_on_a_rare_value_is_confident(shared_father_name):
+    network = shared_father_name.person_network("a", degree=1)
+    # weight_for("father_name") == 0.7, rarity(2) == 1.0, same key
+    assert network["links"][0]["confidence"] == pytest.approx(0.7)
+
+
+def test_cross_key_match_is_penalised():
+    service = make_service(
+        {
+            "a": person("Alice"),
+            "b": person("Bob"),
+            "value:x": value_node("12 main st"),
+        },
+        [
+            ("a", "value:x", FIELD_VALUE, {"field_key": "address"}),
+            ("b", "value:x", FIELD_VALUE, {"field_key": "employer_address"}),
+        ],
+    )
+    network = service.person_network("a", degree=1)
+    via = network["links"][0]["via"][0]
+    assert via["same_key"] is False
+    # 0.7 * 1.0 * 0.6
+    assert network["links"][0]["confidence"] == pytest.approx(0.42)
+
+
+def test_two_matching_fields_compound():
+    service = make_service(
+        {
+            "a": person("Alice"),
+            "b": person("Bob"),
+            "value:father": value_node("ahmed"),
+            "value:addr": value_node("12 main st"),
+        },
+        [
+            ("a", "value:father", FIELD_VALUE, {"field_key": "father_name"}),
+            ("b", "value:father", FIELD_VALUE, {"field_key": "father_name"}),
+            ("a", "value:addr", FIELD_VALUE, {"field_key": "address"}),
+            ("b", "value:addr", FIELD_VALUE, {"field_key": "address"}),
+        ],
+    )
+    network = service.person_network("a", degree=1)
+    link = network["links"][0]
+    assert len(link["via"]) == 2
+    # noisy-OR of 0.7 and 0.7
+    assert link["confidence"] == pytest.approx(0.91)
+
+
+def test_a_value_shared_by_a_crowd_scores_low():
+    people = {f"p{i}": person(f"P{i}") for i in range(6)}
+    service = make_service(
+        {**people, "value:x": value_node("dubai")},
+        [(f"p{i}", "value:x", FIELD_VALUE, {"field_key": "city"}) for i in range(6)],
+    )
+    network = service.person_network("p0", degree=1)
+    # rarity(6) == 0.2, default weight 0.5 -> 0.1
+    assert network["links"][0]["confidence"] == pytest.approx(0.1)
+
+
+def test_field_values_chain_into_second_degree():
+    service = make_service(
+        {
+            "a": person("Alice"),
+            "b": person("Bob"),
+            "c": person("Carol"),
+            "value:1": value_node("ahmed"),
+            "value:2": value_node("12 main st"),
+        },
+        [
+            ("a", "value:1", FIELD_VALUE, {"field_key": "father_name"}),
+            ("b", "value:1", FIELD_VALUE, {"field_key": "father_name"}),
+            ("b", "value:2", FIELD_VALUE, {"field_key": "address"}),
+            ("c", "value:2", FIELD_VALUE, {"field_key": "address"}),
+        ],
+    )
+    assert degrees(service.person_network("a", degree=2)) == {"a": 0, "b": 1, "c": 2}
+    assert "c" not in ids(service.person_network("a", degree=1))
