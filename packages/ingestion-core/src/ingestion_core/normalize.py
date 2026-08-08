@@ -83,10 +83,11 @@ def deterministic_key(entity: ExtractedEntity) -> str | None:
     if t == "Phone":
         v = normalize_phone(attrs.get("number") or entity.name)
         return f"phone:{v}" if v else None
-    if t == "Passport":
+    if t == "Document":
         raw = attrs.get("number") or entity.name
-        v = normalize_passport_number(raw)
-        return f"passport:{v}" if v else None
+        v = normalize_national_id(str(raw))
+        doc_type = str(attrs.get("document_type") or "document").strip().upper()
+        return f"document:{doc_type}:{v}" if v else None
     if t == "BankAccount":
         raw = attrs.get("iban") or attrs.get("account_number") or entity.name
         v = normalize_iban(raw)
@@ -129,10 +130,11 @@ def normalize_extraction(result: ExtractionResult) -> ExtractionResult:
                 continue
             attrs["address"] = norm
             ent.name = norm
-        elif t == "Passport":
+        elif t == "Document":
             raw = attrs.get("number") or ent.name
-            attrs["number"] = normalize_passport_number(raw)
+            attrs["number"] = normalize_national_id(str(raw))
             ent.name = attrs["number"]
+            attrs["document_type"] = str(attrs.get("document_type") or "document").strip().lower()
             for k in ("issue_date", "expiry_date", "dob"):
                 if k in attrs and (norm := normalize_date(str(attrs[k]))):
                     attrs[k] = norm

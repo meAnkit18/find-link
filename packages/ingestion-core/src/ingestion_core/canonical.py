@@ -12,7 +12,7 @@ class EntityType(str, Enum):
     ORGANIZATION = "Organization"
     ADDRESS = "Address"
     COUNTRY = "Country"
-    PASSPORT = "Passport"
+    DOCUMENT = "Document"
     PHONE = "Phone"
     EMAIL = "Email"
     BANK_ACCOUNT = "BankAccount"
@@ -23,7 +23,7 @@ RELATIONSHIP_TYPES: dict[str, tuple[set[str], set[str]]] = {
     "WORKS_AT":     ({"Person"}, {"Company", "Organization"}),
     "OWNS":         ({"Person", "Company", "Organization"}, {"Company", "Organization", "Vehicle"}),
     "PAYS":         ({"Person", "Company", "Organization"}, {"Person", "Company", "Organization"}),
-    "HAS_PASSPORT": ({"Person"}, {"Passport"}),
+    "HAS_DOCUMENT": ({"Person"}, {"Document"}),
     "HAS_PHONE":    ({"Person", "Company", "Organization"}, {"Phone"}),
     "HAS_EMAIL":    ({"Person", "Company", "Organization"}, {"Email"}),
     "HAS_ACCOUNT":  ({"Person", "Company", "Organization"}, {"BankAccount"}),
