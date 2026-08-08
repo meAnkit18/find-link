@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
+import { Search } from 'lucide-react'
 import { api } from '../../api/client'
 import type { SearchResult } from '../../api/types'
 import InfoTooltip from '../common/InfoTooltip'
@@ -30,13 +31,15 @@ export default function SearchBar({ graphId, onResultClick }: Props) {
   return (
     <div style={{ position: 'relative' }}>
       <div className="row" style={{ gap: 'var(--space-1)' }}>
-        <input
-          className="input"
-          style={{ width: '100%' }}
-          placeholder="Search nodes by name…"
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-        />
+        <div className="search-input-wrap">
+          <Search className="search-input-wrap__icon" size={14} />
+          <input
+            className="input input--search"
+            placeholder="Search nodes…"
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+          />
+        </div>
         <InfoTooltip text="Find a person, company, or other item in this graph by typing part of its name." />
       </div>
       {results.length > 0 && (

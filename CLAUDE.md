@@ -29,8 +29,13 @@ Notes:
   this box usually has well under 1GB genuinely free, so it leans on swap.
   Check `free -h` first and prefer `docker compose down` (without `-v`) when
   you're finished — `-v` wipes the ingested graph data.
-- Space `intel_kg_v2` persists in Docker volumes across runs, so there is
-  real data to test against; don't assume an empty graph.
+- Spaces persist in Docker volumes across runs, but they are close to empty
+  — as of 2026-08-08, `intel_kg_v2` has no people at all, and
+  `intelligence_graph` (the space the API actually uses by default, via
+  `NEBULA_SPACE`) has 2 people and 0 documents. Don't assume there is real
+  data to test against: anything that needs a populated graph needs seeding
+  first, and a "it works against live data" check on this box proves very
+  little.
 - Frontend-only is still fine for pure UI work and needs none of the above.
 
 Note: `origin` is configured over HTTPS with no credential helper, so a plain `git push` fails here. There's a working SSH deploy key at `~/ankit_kumar/github_connect/ankit_kumar` (pub key registered to meAnkit18) — push with:

@@ -31,24 +31,34 @@ export function usePersonNetworkState() {
     setError(null)
   }, [])
 
-  const loadNetwork = useCallback(async (rootId: string, degree: number) => {
-    setLoadingNetwork(true)
-    setError(null)
-    try {
-      const result = await api.getPersonNetwork(rootId, degree)
-      setNetwork(result)
-      // A new network is a new question — nothing carries over except the
-      // attribute cache, which is keyed by person and still valid.
-      setExpanded(new Set())
-      return result
-    } catch (err) {
-      setNetwork(null)
-      setError((err as Error).message)
-      return null
-    } finally {
-      setLoadingNetwork(false)
-    }
-  }, [])
+  const loadNetwork = useCallback(
+    async (
+      rootId: string,
+      degree: number,
+      opts?: { minConfidence?: number; preserveExpanded?: boolean },
+    ) => {
+      setLoadingNetwork(true)
+      setError(null)
+      try {
+        const result = await api.getPersonNetwork(rootId, degree, {
+          minConfidence: opts?.minConfidence,
+        })
+        setNetwork(result)
+        // Raising the degree is the same question asked wider, so which
+        // people the user had opened still applies. A new root is a new
+        // question, and nothing carries over but the attribute cache.
+        if (!opts?.preserveExpanded) setExpanded(new Set())
+        return result
+      } catch (err) {
+        setNetwork(null)
+        setError((err as Error).message)
+        return null
+      } finally {
+        setLoadingNetwork(false)
+      }
+    },
+    [],
+  )
 
   const toggleExpand = useCallback(
     async (personId: string) => {
@@ -127,9 +137,13 @@ export function usePersonNetworkState() {
       dst: link.target,
       edge_type: link.label,
       rank: 0,
-      // relationship_type is what the canvas prefers as an edge label, and
-      // via_count is what scales the link's width.
-      properties: { relationship_type: link.label, via_count: link.via.length },
+      // relationship_type is what the canvas prefers as an edge label,
+      // via_count scales the link's width, and confidence fades it.
+      properties: {
+        relationship_type: link.label,
+        via_count: link.via.length,
+        confidence: link.confidence,
+      },
     }))
     for (const personId of expanded) {
       for (const attribute of attributes.get(personId) ?? []) {

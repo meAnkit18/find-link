@@ -28,7 +28,18 @@ RELATIONSHIP TYPES (use exactly these): {_REL_TYPES}
 Rules:
 - Give every entity a local_id like "e1", "e2", ...
 - "name" is the primary surface form. Put everything else in "attributes"
-  (dob, nationality, number, address components, iban, plate, role, dates...).
+  (dob, nationality, national_id, number, address components, iban, plate,
+  role, dates...).
+- Every identity document (passport, Emirates ID, national ID card, driving
+  licence, residence permit, ...) is its own Document entity plus a
+  HAS_DOCUMENT relationship from the person. Set attributes.document_type to
+  a lowercase snake_case kind ("passport", "emirates_id", "national_id",
+  "driving_licence"), attributes.number to the document number, and put every
+  other field the document states (father_name, mother_name, place_of_birth,
+  issue_date, expiry_date, dob, address, ...) in that Document's attributes —
+  NOT on the person.
+- The person keeps only their own identity fields (name, dob). Do not copy a
+  document's fields onto the person.
 - Deduplicate WITHIN this text: the same real-world thing appears once.
 - Relationships reference entities by local_id only.
 - confidence is 0.0-1.0: how certain you are given the text.

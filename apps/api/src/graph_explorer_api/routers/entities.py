@@ -2,7 +2,11 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
-from graph_explorer_api.dependencies import get_graph_service, get_person_network_service
+from graph_explorer_api.dependencies import (
+    get_graph_service,
+    get_optional_person_network_service,
+    get_person_network_service,
+)
 from graph_explorer_api.services.graph_service import GraphService
 from graph_explorer_api.services.person_network_service import (
     DEFAULT_MAX_FANOUT,
@@ -65,6 +69,9 @@ def person_network(
     connectors: str | None = Query(
         None, description="Comma-separated edge types to treat as connections"
     ),
+    min_confidence: float = Query(
+        0.0, ge=0.0, le=1.0, description="Drop links scoring below this confidence"
+    ),
     max_fanout: int = Query(
         DEFAULT_MAX_FANOUT,
         ge=1,
@@ -78,6 +85,7 @@ def person_network(
         root_id=entity_id,
         degree=degree,
         connectors=connectors.split(",") if connectors else None,
+        min_confidence=min_confidence,
         max_fanout=max_fanout,
         max_persons=max_persons,
     )
@@ -101,10 +109,13 @@ def entity_attributes(
 def get_entity_risk(
     entity_id: str,
     graph_service: GraphService = Depends(get_graph_service),
+    person_network: PersonNetworkService | None = Depends(
+        get_optional_person_network_service
+    ),
 ):
     from graph_explorer_api.services.risk_service import RiskService
 
-    risk_service = RiskService(graph_service)
+    risk_service = RiskService(graph_service, person_network=person_network)
     return risk_service.calculate_for_entity(entity_id)
 
 
@@ -112,13 +123,16 @@ def get_entity_risk(
 def explain_entity_risk(
     entity_id: str,
     graph_service: GraphService = Depends(get_graph_service),
+    person_network: PersonNetworkService | None = Depends(
+        get_optional_person_network_service
+    ),
 ):
     from graph_explorer_api.services.explanation_service import (
         InvestigationExplanationService,
     )
     from graph_explorer_api.services.risk_service import RiskService
 
-    risk_service = RiskService(graph_service)
+    risk_service = RiskService(graph_service, person_network=person_network)
     risk = risk_service.calculate_for_entity(entity_id)
     explanation_service = InvestigationExplanationService()
     return explanation_service.explain_risk(risk)

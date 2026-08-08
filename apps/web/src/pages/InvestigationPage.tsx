@@ -1,14 +1,19 @@
 import { useCallback, useMemo, useRef, useState } from 'react'
 import type { Position } from 'cytoscape'
+import { Search } from 'lucide-react'
 import { api } from '../api/client'
 import type { EntitySearchHit, PersonLink, PersonLinkVia, RiskResult } from '../api/types'
 import JsonView from '../components/common/JsonView'
+import PropertiesList from '../components/common/PropertiesList'
 import InfoTooltip from '../components/common/InfoTooltip'
+import { humanizeLabel } from '../components/common/format'
 import GraphCanvas, { type GraphCanvasHandle } from '../components/explorer/GraphCanvas'
 import GraphCanvas3D from '../components/explorer/GraphCanvas3D'
 import GraphControls from '../components/explorer/GraphControls'
+import { colorForTag } from '../components/explorer/graphStyle'
 import { computeRadialPositions, type RadialChild } from '../components/explorer/radialLayout'
 import { usePersonNetworkState, PERSON_TAG } from '../hooks/usePersonNetworkState'
+import { useResizablePanel } from '../hooks/useResizablePanel'
 
 // People are the only primary nodes here: everything else on the canvas is
 // an attribute fanned out from a person the investigator clicked.
@@ -26,11 +31,17 @@ export function riskColor(level: string): string {
 }
 
 function viaText(via: PersonLinkVia): string {
-  // Only a shared_attribute is something the two people have in common; the
-  // other kinds carry a ready sentence, and rendering them as "company: X"
-  // would claim they share X when they don't.
+  // Only a shared_attribute or a shared_field is something the two people
+  // have in common; the other kinds carry a ready sentence, and rendering
+  // them as "company: X" would claim they share X when they don't.
   if (via.kind === 'shared_attribute') {
     return `${via.connector_tag.replace(/_/g, ' ')}: ${via.connector_label}`
+  }
+  if (via.kind === 'shared_field') {
+    const keys = via.same_key
+      ? via.field_key.replace(/_/g, ' ')
+      : via.field_keys.map((k) => k.replace(/_/g, ' ')).join(' ↔ ')
+    return `matching ${keys}: “${via.connector_label}”`
   }
   return via.label
 }
@@ -49,6 +60,14 @@ export function InvestigationGraphPage() {
     return view === '2d' ? canvas2DRef.current : canvas3DRef.current
   }
 
+  const detailPanel = useResizablePanel({
+    defaultWidth: 340,
+    min: 280,
+    max: 620,
+    storageKey: 'investigation.detailPanelWidth',
+    side: 'right',
+  })
+
   const [searchQuery, setSearchQuery] = useState('')
   const [searchResults, setSearchResults] = useState<EntitySearchHit[]>([])
   const [searchError, setSearchError] = useState<string | null>(null)
@@ -56,6 +75,7 @@ export function InvestigationGraphPage() {
   const [rootId, setRootId] = useState<string | null>(null)
   const [selectedVid, setSelectedVid] = useState<string | null>(null)
   const [degree, setDegree] = useState(1)
+  const [minConfidence, setMinConfidence] = useState(0)
   const [zoom, setZoom] = useState(1)
   const [isFullscreen, setIsFullscreen] = useState(false)
   const [risk, setRisk] = useState<RiskResult | null>(null)
@@ -66,6 +86,11 @@ export function InvestigationGraphPage() {
   // Where the force layout put each person. Attribute rings are placed
   // relative to these, so they have to come back from the canvas.
   const [positions, setPositions] = useState<Map<string, Position>>(new Map())
+  // A user-dragged attribute's offset from its computed ring slot. Stored as
+  // an offset (not an absolute position) so a manually-nudged attribute
+  // still tracks its parent if the parent is dragged afterwards — only the
+  // "where on the ring" part is overridden.
+  const [manualOffsets, setManualOffsets] = useState<Map<string, Position>>(new Map())
 
   const handlePositionsSettled = useCallback((settled: Map<string, Position>) => {
     setPositions(new Map(settled))
@@ -88,7 +113,7 @@ export function InvestigationGraphPage() {
     [graph.attributeParents, graph.attributes],
   )
 
-  const pinnedPositions = useMemo(() => {
+  const radialBase = useMemo(() => {
     // Every person is an obstacle: a ring must not grow so wide that it
     // swallows the neighbour it sits next to.
     const obstacles = [...graph.personsById.keys()]
@@ -96,6 +121,26 @@ export function InvestigationGraphPage() {
       .filter((p): p is Position => p != null)
     return computeRadialPositions(positions, radialChildren, { obstacles })
   }, [positions, radialChildren, graph.personsById])
+
+  const pinnedPositions = useMemo(() => {
+    if (manualOffsets.size === 0) return radialBase
+    const withOffsets = new Map(radialBase)
+    for (const [id, offset] of manualOffsets) {
+      const base = radialBase.get(id)
+      if (!base) continue
+      withOffsets.set(id, { x: base.x + offset.x, y: base.y + offset.y })
+    }
+    return withOffsets
+  }, [radialBase, manualOffsets])
+
+  const handleChildMoved = useCallback(
+    (vid: string, position: Position) => {
+      const base = radialBase.get(vid)
+      if (!base) return
+      setManualOffsets((prev) => new Map(prev).set(vid, { x: position.x - base.x, y: position.y - base.y }))
+    },
+    [radialBase],
+  )
 
   async function handleSearch() {
     if (!searchQuery.trim()) return
@@ -111,10 +156,22 @@ export function InvestigationGraphPage() {
     }
   }
 
-  async function loadNetwork(personId: string, nextDegree: number) {
+  async function loadNetwork(
+    personId: string,
+    nextDegree: number,
+    opts?: { preserveExpanded?: boolean },
+  ) {
     setStatus(`Finding connections within ${nextDegree} degree${nextDegree === 1 ? '' : 's'}…`)
-    const result = await graph.loadNetwork(personId, nextDegree)
-    setPositions(new Map())
+    const result = await graph.loadNetwork(personId, nextDegree, {
+      minConfidence,
+      preserveExpanded: opts?.preserveExpanded,
+    })
+    // Widening the same question keeps the layout the user is reading; only
+    // a new root starts the canvas over.
+    if (!opts?.preserveExpanded) {
+      setPositions(new Map())
+      setManualOffsets(new Map())
+    }
     setStatus(
       result
         ? `${result.persons.length - 1} connected ${
@@ -134,7 +191,7 @@ export function InvestigationGraphPage() {
 
   async function handleDegreeChange(next: number) {
     setDegree(next)
-    if (rootId) await loadNetwork(rootId, next)
+    if (rootId) await loadNetwork(rootId, next, { preserveExpanded: true })
   }
 
   function isPerson(vid: string): boolean {
@@ -184,6 +241,27 @@ export function InvestigationGraphPage() {
     ? graph.linksByPerson.get(selectedVid) ?? []
     : []
 
+  // Nothing selected — the right panel falls back to an at-a-glance
+  // overview of everyone currently on the canvas, so there's still
+  // somewhere to see it all at once instead of having to click through
+  // each node individually.
+  const allPeople = useMemo(
+    () =>
+      [...graph.personsById.values()].sort((a, b) => a.degree - b.degree || a.label.localeCompare(b.label)),
+    [graph.personsById],
+  )
+  const attributesByTag = useMemo(() => {
+    const byTag = new Map<string, typeof graph.canvasNodes>()
+    for (const node of graph.canvasNodes) {
+      if (graph.personsById.has(node.vid)) continue // people are listed separately, above
+      const tag = node.tags[0] ?? 'attribute'
+      const list = byTag.get(tag)
+      if (list) list.push(node)
+      else byTag.set(tag, [node])
+    }
+    return [...byTag.entries()].sort((a, b) => b[1].length - a[1].length)
+  }, [graph.canvasNodes, graph.personsById])
+
   const notice = useMemo(() => {
     const parts: string[] = []
     if (graph.network?.truncated) {
@@ -198,22 +276,24 @@ export function InvestigationGraphPage() {
   }, [graph.network])
 
   return (
-    <main className="page page--flush explorer graph-dark">
+    <main className="page page--flush explorer">
       <div className="explorer-topbar">
         <div className="row" style={{ flex: '0 0 auto' }}>
           <strong>Investigation</strong>
         </div>
         <div className="explorer-topbar__search" style={{ position: 'relative' }}>
-          <div className="row">
-            <input
-              className="input"
-              style={{ flex: 1 }}
-              placeholder="Search for a person…"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
-            />
-            <button className="btn btn--primary" onClick={handleSearch}>
+          <div className="row" style={{ gap: 'var(--space-1)' }}>
+            <div className="search-input-wrap">
+              <Search className="search-input-wrap__icon" size={14} />
+              <input
+                className="input input--search"
+                placeholder="Search for a person…"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
+              />
+            </div>
+            <button className="btn btn--primary btn-sm" onClick={handleSearch}>
               Search
             </button>
           </div>
@@ -248,6 +328,26 @@ export function InvestigationGraphPage() {
             <option value={3}>3 degrees</option>
           </select>
         </label>
+        <label className="row" style={{ gap: 'var(--space-2)' }}>
+          <span className="muted">Min confidence</span>
+          <InfoTooltip text="How sure the link has to be before it counts. A value only these two people share scores high; one that forty people share scores near zero. Raising this also hides people you could only reach through a weak link." />
+          <input
+            type="range"
+            min={0}
+            max={1}
+            step={0.05}
+            value={minConfidence}
+            onChange={(e) => setMinConfidence(Number(e.target.value))}
+            // One request per drag, not one per step.
+            onPointerUp={() => {
+              if (rootId) void loadNetwork(rootId, degree, { preserveExpanded: true })
+            }}
+            aria-label="Minimum link confidence"
+          />
+          <span className="muted" style={{ width: 32 }}>
+            {minConfidence.toFixed(2)}
+          </span>
+        </label>
       </div>
 
       {(status || searchError || graph.error) && (
@@ -273,6 +373,7 @@ export function InvestigationGraphPage() {
               onZoomChange={setZoom}
               pinnedPositions={pinnedPositions}
               onParentMoved={handleParentMoved}
+              onChildMoved={handleChildMoved}
               onPositionsSettled={handlePositionsSettled}
             />
           ) : (
@@ -311,10 +412,31 @@ export function InvestigationGraphPage() {
           />
         </div>
 
-        <div className="explorer-right">
+        {detailPanel.isDesktop && (
+          <div
+            className="resize-handle"
+            role="separator"
+            aria-orientation="vertical"
+            aria-label="Resize detail panel"
+            {...detailPanel.handleProps}
+          />
+        )}
+
+        <div
+          className="explorer-right"
+          style={detailPanel.isDesktop ? { width: detailPanel.width } : undefined}
+        >
           {selectedPerson ? (
             <div className="panel stack">
-              <h3>{selectedPerson.label}</h3>
+              <div>
+                <h3 style={{ marginBottom: 4 }}>{selectedPerson.label}</h3>
+                <div className="row" style={{ flexWrap: 'wrap', gap: 'var(--space-1)' }}>
+                  <span className="tag-chip">
+                    <span className="tag-dot" style={{ background: colorForTag(PERSON_TAG) }} />
+                    {selectedPerson.entity_type}
+                  </span>
+                </div>
+              </div>
               <p className="text-secondary mono">{selectedPerson.id}</p>
               <p className="text-secondary">
                 {selectedPerson.degree === 0
@@ -362,7 +484,10 @@ export function InvestigationGraphPage() {
                       const other = graph.personsById.get(otherId)
                       return (
                         <li key={`${link.source}|${link.target}`}>
-                          <strong>{other?.label ?? otherId}</strong>
+                          <button className="link-button" onClick={() => setSelectedVid(otherId)}>
+                            {other?.label ?? otherId}
+                          </button>
+                          <span className="muted"> · {link.confidence.toFixed(2)}</span>
                           <div className="mono muted">
                             {link.via.map(viaText).join(' · ')}
                           </div>
@@ -390,20 +515,30 @@ export function InvestigationGraphPage() {
               )}
 
               <h4>Properties</h4>
-              <JsonView data={selectedPerson.properties} title="properties" initiallyOpen />
+              <PropertiesList properties={selectedPerson.properties} />
             </div>
           ) : selectedAttribute ? (
             <div className="panel stack">
-              <h3>{selectedAttribute.label}</h3>
-              <p className="text-secondary mono">
-                {selectedAttribute.tag} · {selectedAttribute.id}
-              </p>
+              <div>
+                <h3 style={{ marginBottom: 4 }}>{selectedAttribute.label}</h3>
+                <div className="row" style={{ flexWrap: 'wrap', gap: 'var(--space-1)' }}>
+                  <span className="tag-chip">
+                    <span className="tag-dot" style={{ background: colorForTag(selectedAttribute.tag) }} />
+                    {selectedAttribute.tag.replace(/_/g, ' ')}
+                  </span>
+                </div>
+              </div>
+              <p className="text-secondary mono">{selectedAttribute.id}</p>
               {selectedAttribute.shared_with.length > 0 ? (
                 <div className="stack">
                   <h4>Shared with</h4>
                   <ul className="risk-factors">
                     {selectedAttribute.shared_with.map((personId) => (
-                      <li key={personId}>{graph.personsById.get(personId)?.label ?? personId}</li>
+                      <li key={personId}>
+                        <button className="link-button" onClick={() => setSelectedVid(personId)}>
+                          {graph.personsById.get(personId)?.label ?? personId}
+                        </button>
+                      </li>
                     ))}
                   </ul>
                 </div>
@@ -411,7 +546,67 @@ export function InvestigationGraphPage() {
                 <p className="text-secondary">Held by this person alone.</p>
               )}
               <h4>Properties</h4>
-              <JsonView data={selectedAttribute.properties} title="properties" initiallyOpen />
+              <PropertiesList properties={selectedAttribute.properties} />
+            </div>
+          ) : graph.network ? (
+            <div className="panel stack">
+              <div>
+                <h3 style={{ marginBottom: 4 }}>Everyone on this canvas</h3>
+                <p className="text-secondary">
+                  Nothing selected — here's everything currently shown. Click a person or
+                  a detail below (or on the canvas) to see its full profile.
+                </p>
+              </div>
+
+              <div className="stack">
+                <h4>People ({allPeople.length})</h4>
+                <div className="stack" style={{ gap: 4 }}>
+                  {allPeople.map((person) => (
+                    <button
+                      key={person.id}
+                      className="list-item"
+                      onClick={() => setSelectedVid(person.id)}
+                    >
+                      <div className="row" style={{ justifyContent: 'space-between', gap: 'var(--space-2)' }}>
+                        <strong>{person.label}</strong>
+                        <span className="badge">
+                          {person.degree === 0 ? 'root' : `${person.degree}°`}
+                        </span>
+                      </div>
+                      <div className="mono muted" style={{ fontSize: 11 }}>
+                        {person.entity_type}
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {attributesByTag.length > 0 && (
+                <div className="stack">
+                  <h4>Details shown</h4>
+                  <div className="stack">
+                    {attributesByTag.map(([tag, tagNodes]) => (
+                      <div key={tag}>
+                        <span className="tag-chip" style={{ marginBottom: 4 }}>
+                          <span className="tag-dot" style={{ background: colorForTag(tag) }} />
+                          {humanizeLabel(tag)} ({tagNodes.length})
+                        </span>
+                        <div className="stack" style={{ gap: 4, marginTop: 4 }}>
+                          {tagNodes.map((node) => (
+                            <button
+                              key={node.vid}
+                              className="list-item"
+                              onClick={() => setSelectedVid(node.vid)}
+                            >
+                              {node.label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           ) : (
             <div className="panel">

@@ -2,6 +2,18 @@ from __future__ import annotations
 
 from risk_engine.models import RiskFactor, RiskResult
 
+# Being a PEP is not wrongdoing — it mandates enhanced due diligence, not
+# refusal. Weighted so a PEP with nothing else against them lands in the
+# middle band (review) rather than the top one (block), but combines with
+# any other factor to clear the high threshold.
+PEP_WEIGHT = 0.7
+# Relatives and close associates carry the same category of risk at a
+# discount, per the usual FATF "RCA" treatment.
+PEP_ASSOCIATE_VALUE = 0.7
+
+PEP_SELF = "self"
+PEP_ASSOCIATE = "associate"
+
 
 class RiskScorer:
     def calculate(self, entity_id: str, context: dict) -> RiskResult:
@@ -42,6 +54,25 @@ class RiskScorer:
                     value=min(context["shared_bank_account_count"] / 3, 1.0),
                     explanation="Entity shares bank account links with flagged entities",
                     evidence_ids=context.get("shared_bank_account_evidence_ids", []),
+                )
+            )
+
+        pep_relationship = context.get("pep_relationship")
+        if pep_relationship in (PEP_SELF, PEP_ASSOCIATE):
+            is_self = pep_relationship == PEP_SELF
+            factors.append(
+                RiskFactor(
+                    code="pep_exposure",
+                    weight=PEP_WEIGHT,
+                    value=1.0 if is_self else PEP_ASSOCIATE_VALUE,
+                    explanation=(
+                        "Entity is a politically exposed person — enhanced due "
+                        "diligence required"
+                        if is_self
+                        else "Entity is a relative or close associate of a "
+                             "politically exposed person"
+                    ),
+                    evidence_ids=context.get("pep_evidence_ids", []),
                 )
             )
 

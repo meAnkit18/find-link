@@ -20,8 +20,25 @@ from typing import Callable, NamedTuple
 from graph_core.client import GraphClient
 from graph_core.storage.result import RawEdge, RawVertex
 from graph_explorer_api.graph_clients import GraphClientCache
+from graph_explorer_api.services.connection_confidence import (
+    BRIDGE_CONFIDENCE,
+    DIRECT_CONFIDENCE,
+    combine,
+    match_confidence,
+)
+from graph_explorer_api.services.entity_props import merged_properties
 
 PERSON_TAG = "person"
+
+# The field-value index: one vertex per distinct normalised value, joined to
+# every person holding it. Two people on the same one agreed on a value.
+FIELD_VALUE_TAG = "field_value"
+FIELD_VALUE_EDGE = "HAS_FIELD_VALUE"
+
+# What a person expands into on the canvas. Phone/email/account/vehicle are
+# still ingested and still form links — they are simply not what an
+# investigator opens a person to look at.
+EXPANDABLE_TAGS: frozenset[str] = frozenset({"document"})
 
 # Person->person in one stored edge: the relationship *is* the connection.
 DIRECT_EDGES: tuple[str, ...] = (
@@ -35,9 +52,10 @@ DIRECT_EDGES: tuple[str, ...] = (
 # is the reason. WORKS_AT/OWNS are in here deliberately — a shared employer
 # is a real lead, even though a company is a first-class entity elsewhere.
 SHARED_EDGES: tuple[str, ...] = (
+    "HAS_FIELD_VALUE",
     "HAS_PHONE",
     "HAS_EMAIL",
-    "HAS_PASSPORT",
+    "HAS_DOCUMENT",
     "HAS_ACCOUNT",
     "OWNS_VEHICLE",
     "LOCATED_AT",
@@ -100,6 +118,7 @@ class PersonNetworkService:
         root_id: str,
         degree: int = 1,
         connectors: list[str] | None = None,
+        min_confidence: float = 0.0,
         max_fanout: int = DEFAULT_MAX_FANOUT,
         max_persons: int = DEFAULT_MAX_PERSONS,
     ) -> dict | None:
@@ -126,7 +145,15 @@ class PersonNetworkService:
                 break
             found = self._expand_level(frontier, set(persons), edges, max_fanout)
             suppressed.update(found.suppressed_hubs)
+
+            # Filtering before the frontier is built is what makes the
+            # threshold cut the path rather than just hide one edge: a person
+            # only reachable through a link too weak to show is not reachable.
+            reachable: set[str] = set()
             for key, via in found.links.items():
+                if _link_confidence(via) < min_confidence:
+                    continue
+                reachable.update(key)
                 link = links.get(key)
                 if link is None:
                     links[key] = {
@@ -140,7 +167,7 @@ class PersonNetworkService:
 
             next_frontier: list[str] = []
             for vid in sorted(found.persons):
-                if vid in persons:
+                if vid in persons or vid not in reachable:
                     continue
                 if len(persons) >= max_persons:
                     truncated = True
@@ -160,6 +187,7 @@ class PersonNetworkService:
         return {
             "root_id": root_id,
             "degree": degree,
+            "min_confidence": min_confidence,
             "persons": sorted(persons.values(), key=lambda p: (p["degree"], p["label"])),
             "links": sorted(kept_links, key=lambda link: (link["degree"], link["source"])),
             "truncated": truncated,
@@ -185,7 +213,9 @@ class PersonNetworkService:
         candidate_ids = _endpoints(own_edges) - {entity_id}
         vertices = self._fetch_vertices(sorted(candidate_ids))
         connector_ids = [
-            vid for vid, vertex in vertices.items() if PERSON_TAG not in vertex.tags
+            vid
+            for vid, vertex in vertices.items()
+            if PERSON_TAG not in vertex.tags and _primary_tag(vertex) in EXPANDABLE_TAGS
         ]
 
         edge_type_by_connector: dict[str, str] = {}
@@ -304,6 +334,7 @@ class PersonNetworkService:
                     "kind": "direct",
                     "edge_types": [edge.edge_type],
                     "label": relationship or _humanize(edge.edge_type),
+                    "confidence": DIRECT_CONFIDENCE,
                 }
             )
             for endpoint in (edge.src, edge.dst):
@@ -313,11 +344,20 @@ class PersonNetworkService:
         connector_set = set(connector_ids)
         owners: dict[str, set[str]] = defaultdict(set)
         owner_edge_types: dict[tuple[str, str], set[str]] = defaultdict(set)
+        owner_field_keys: dict[tuple[str, str], set[str]] = defaultdict(set)
+        owner_documents: dict[tuple[str, str], set[str]] = defaultdict(set)
         for edge in owners_edges:
             for connector, person in ((edge.src, edge.dst), (edge.dst, edge.src)):
                 if connector in connector_set and is_person(person):
                     owners[connector].add(person)
                     owner_edge_types[(connector, person)].add(edge.edge_type)
+                    if edge.edge_type == FIELD_VALUE_EDGE:
+                        field_key = str(edge.properties.get("field_key") or "").strip()
+                        if field_key:
+                            owner_field_keys[(connector, person)].add(field_key)
+                        document = str(edge.properties.get("document_id") or "").strip()
+                        if document:
+                            owner_documents[(connector, person)].add(document)
 
         for connector, connected in owners.items():
             vertex = vertices.get(connector)
@@ -337,6 +377,43 @@ class PersonNetworkService:
                 continue  # an attribute of exactly one person links nobody
 
             members = sorted(connected)
+
+            if _primary_tag(vertex) == FIELD_VALUE_TAG:
+                # Unlike a shared phone, a matching value is scored per pair:
+                # which field each side used decides whether this is a
+                # same-key match or the weaker cross-key kind.
+                for index, first in enumerate(members):
+                    for second in members[index + 1 :]:
+                        first_keys = owner_field_keys[(connector, first)]
+                        second_keys = owner_field_keys[(connector, second)]
+                        shared_keys = first_keys & second_keys
+                        all_keys = sorted(first_keys | second_keys)
+                        same_key = bool(shared_keys)
+                        field_key = sorted(shared_keys)[0] if same_key else (
+                            all_keys[0] if all_keys else ""
+                        )
+                        result.links[_pair(first, second)].append({
+                            "kind": "shared_field",
+                            "connector_id": connector,
+                            "connector_tag": FIELD_VALUE_TAG,
+                            "connector_label": _label_of(vertex, connector),
+                            "field_key": field_key,
+                            "field_keys": all_keys,
+                            "same_key": same_key,
+                            "edge_types": [FIELD_VALUE_EDGE],
+                            # Which documents on each side stated the value,
+                            # so the reason is auditable back to its source.
+                            "document_ids": sorted(
+                                owner_documents[(connector, first)]
+                                | owner_documents[(connector, second)]
+                            ),
+                            "confidence": match_confidence(field_key, len(connected), same_key),
+                        })
+                for member in members:
+                    if member not in frontier_set and member in vertices:
+                        result.persons[member] = vertices[member]
+                continue
+
             via = {
                 "kind": "shared_attribute",
                 "connector_id": connector,
@@ -348,6 +425,9 @@ class PersonNetworkService:
                         for member in members
                         for edge_type in owner_edge_types[(connector, member)]
                     }
+                ),
+                "confidence": match_confidence(
+                    _primary_tag(vertex), len(connected), same_key=True
                 ),
             }
             for index, first in enumerate(members):
@@ -436,6 +516,7 @@ class PersonNetworkService:
                     "linked_label": _label_of(vertices[other], other),
                     "edge_types": [edge.edge_type],
                     "label": _bridge_label(edge, vertices),
+                    "confidence": BRIDGE_CONFIDENCE,
                 }
                 for person in here:
                     for far_person in there:
@@ -502,10 +583,7 @@ def _primary_tag(vertex: RawVertex) -> str:
 
 
 def _merged_properties(vertex: RawVertex) -> dict:
-    merged: dict = {}
-    for props in vertex.tags.values():
-        merged.update(props)
-    return merged
+    return merged_properties(vertex)
 
 
 def _label_of(vertex: RawVertex, fallback: str) -> str:
@@ -559,7 +637,17 @@ def _via_key(via: dict) -> tuple:
     reason, not two, so the pair of connectors is sorted rather than ordered.
     """
     connectors = tuple(sorted(c for c in (via.get("connector_id"), via.get("linked_id")) if c))
-    return (via.get("kind"), connectors, tuple(via.get("edge_types", [])))
+    return (
+        via.get("kind"),
+        connectors,
+        tuple(via.get("edge_types", [])),
+        tuple(via.get("field_keys", [])),
+    )
+
+
+def _link_confidence(via: list[dict]) -> float:
+    """Independent reasons compound — see connection_confidence.combine."""
+    return combine(float(entry.get("confidence") or 0.0) for entry in via)
 
 
 def _finalize_link(link: dict) -> dict:
@@ -568,9 +656,11 @@ def _finalize_link(link: dict) -> dict:
         entry = via[0]
         if entry["kind"] == "shared_attribute":
             label = f"shared {_humanize(entry['connector_tag'])}"
+        elif entry["kind"] == "shared_field":
+            label = f"matching {_humanize(entry['field_key'] or 'field')}"
         else:
             # direct and linked_organisation both carry a ready sentence
             label = entry["label"]
     else:
         label = f"{len(via)} connections"
-    return {**link, "label": label}
+    return {**link, "label": label, "confidence": round(_link_confidence(via), 4)}

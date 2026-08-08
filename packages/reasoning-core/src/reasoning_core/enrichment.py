@@ -43,7 +43,7 @@ def _llm_chat_json(system: str, user: str) -> dict:
 
 
 _REL_TYPES = [
-    "RELATED_TO", "WORKS_AT", "OWNS", "PAYS", "HAS_PASSPORT",
+    "RELATED_TO", "WORKS_AT", "OWNS", "PAYS", "HAS_DOCUMENT",
     "HAS_PHONE", "HAS_EMAIL", "HAS_ACCOUNT", "OWNS_VEHICLE",
     "LOCATED_AT", "CITIZEN_OF",
 ]

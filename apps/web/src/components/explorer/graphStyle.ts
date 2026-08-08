@@ -1,20 +1,21 @@
 import type { GraphEdge, GraphNode } from '../../api/types'
 
-// Dark-bg-legible hues (kindred-main's node color language) — hashed onto
-// tags below, so any schema's tag set gets a consistent, readable color.
+// Mid-saturation hues that read clearly against a light canvas — hashed
+// onto tags below, so any schema's tag set gets a consistent, readable
+// color.
 export const TAG_PALETTE = [
-  '#818cf8',
-  '#fbbf24',
-  '#34d399',
-  '#f472b6',
-  '#f87171',
-  '#38bdf8',
+  '#6366f1',
+  '#d97706',
+  '#059669',
+  '#db2777',
+  '#dc2626',
+  '#0284c7',
 ]
 
 // Shared accent colors for edges and the selected/hover highlight, used by
 // both the 2D (cytoscape) and 3D (Three.js) canvases and the popup card.
-export const EDGE_COLOR = '#94a3b8'
-export const SELECT_COLOR = '#38bdf8'
+export const EDGE_COLOR = '#64748b'
+export const SELECT_COLOR = '#0ea5e9'
 
 export function colorForTag(tag: string): string {
   let hash = 0
@@ -42,6 +43,14 @@ export function roleForNode(node: GraphNode, mainTags: Set<string>): NodeRole {
 export function edgeWeight(edge: GraphEdge): number {
   const count = Number(edge.properties?.via_count)
   return Number.isFinite(count) && count > 0 ? count : 1
+}
+
+/** How confident the projection is in this link, 0-1. Investigation's
+ * person links carry it; anything else is treated as certain, because a
+ * stored edge is an assertion rather than an inference. */
+export function edgeConfidence(edge: GraphEdge): number {
+  const confidence = Number(edge.properties?.confidence)
+  return Number.isFinite(confidence) ? Math.min(1, Math.max(0, confidence)) : 1
 }
 
 /** Prefer the human-readable relationship label captured at ingestion

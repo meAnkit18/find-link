@@ -129,6 +129,23 @@ export type PersonLinkVia =
       connector_label: string
       edge_types: string[]
     }
+  /** Two people whose *separate* documents agree on a value — the same
+   * father's name on two passports. `connector_label` is the matched value
+   * itself. */
+  | {
+      kind: 'shared_field'
+      connector_id: string
+      connector_tag: 'field_value'
+      connector_label: string
+      field_key: string
+      field_keys: string[]
+      same_key: boolean
+      edge_types: string[]
+      /** The documents on each side that stated the value, so a reason is
+       * auditable back to its source. */
+      document_ids: string[]
+      confidence: number
+    }
   /** Two people at *different* organisations that are themselves related —
    * "Nimbus Trade pays Meridian Exports". They share nothing; the link is
    * the relationship between their employers. */
@@ -150,6 +167,9 @@ export interface PersonLink {
   degree: number
   /** Human-readable summary of `via`, e.g. "shared phone". */
   label: string
+  /** 0-1. Independent reasons compound, so this is not the best `via`'s
+   * score but the noisy-OR across all of them. */
+  confidence: number
   via: PersonLinkVia[]
 }
 
@@ -165,6 +185,7 @@ export interface SuppressedHub {
 export interface PersonNetwork {
   root_id: string
   degree: number
+  min_confidence: number
   persons: PersonNode[]
   links: PersonLink[]
   truncated: boolean

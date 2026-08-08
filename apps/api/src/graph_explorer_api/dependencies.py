@@ -59,6 +59,16 @@ def get_person_network_service(request: Request) -> PersonNetworkService:
     return service
 
 
+def get_optional_person_network_service(request: Request) -> PersonNetworkService | None:
+    """Like get_person_network_service, but absent rather than fatal.
+
+    For callers that can still do their job without the person projection —
+    risk scoring reports direct hits either way, and only loses its view of
+    exposure through the network.
+    """
+    return getattr(request.app.state, "person_network_service", None)
+
+
 def get_graph_or_404(graph_id: str, registry: GraphRegistry) -> Graph:
     graph = registry.get(graph_id)
     if graph is None:

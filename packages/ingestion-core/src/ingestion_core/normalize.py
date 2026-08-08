@@ -50,6 +50,13 @@ def normalize_passport_number(raw: str) -> str:
     return re.sub(r"[\s\-]", "", raw).upper()
 
 
+def normalize_national_id(raw: str) -> str:
+    """Strip formatting from a government-issued ID number (e.g. an Emirates
+    ID's 784-YYYY-XXXXXXX-C), so the same person's ID matches whether or not
+    a document rendered the separators."""
+    return re.sub(r"[\s\-]", "", raw).upper()
+
+
 def normalize_iban(raw: str) -> str:
     return re.sub(r"\s", "", raw).upper()
 
@@ -64,16 +71,23 @@ def normalize_person_name(raw: str) -> str:
 
 def deterministic_key(entity: ExtractedEntity) -> str | None:
     t, attrs = entity.type.value, entity.attributes
+    if t == "Person":
+        raw = attrs.get("national_id")
+        if raw:
+            v = normalize_national_id(str(raw))
+            if v:
+                return f"national_id:{v}"
     if t == "Email":
         v = normalize_email(attrs.get("address") or entity.name)
         return f"email:{v}" if v else None
     if t == "Phone":
         v = normalize_phone(attrs.get("number") or entity.name)
         return f"phone:{v}" if v else None
-    if t == "Passport":
+    if t == "Document":
         raw = attrs.get("number") or entity.name
-        v = normalize_passport_number(raw)
-        return f"passport:{v}" if v else None
+        v = normalize_national_id(str(raw))
+        doc_type = str(attrs.get("document_type") or "document").strip().upper()
+        return f"document:{doc_type}:{v}" if v else None
     if t == "BankAccount":
         raw = attrs.get("iban") or attrs.get("account_number") or entity.name
         v = normalize_iban(raw)
@@ -100,6 +114,8 @@ def normalize_extraction(result: ExtractionResult) -> ExtractionResult:
             if dob := attrs.get("dob"):
                 if norm := normalize_date(str(dob)):
                     attrs["dob"] = norm
+            if nid := attrs.get("national_id"):
+                attrs["national_id"] = normalize_national_id(str(nid))
         elif t == "Phone":
             norm = normalize_phone(attrs.get("number") or ent.name)
             if norm is None:
@@ -114,10 +130,11 @@ def normalize_extraction(result: ExtractionResult) -> ExtractionResult:
                 continue
             attrs["address"] = norm
             ent.name = norm
-        elif t == "Passport":
+        elif t == "Document":
             raw = attrs.get("number") or ent.name
-            attrs["number"] = normalize_passport_number(raw)
+            attrs["number"] = normalize_national_id(str(raw))
             ent.name = attrs["number"]
+            attrs["document_type"] = str(attrs.get("document_type") or "document").strip().lower()
             for k in ("issue_date", "expiry_date", "dob"):
                 if k in attrs and (norm := normalize_date(str(attrs[k]))):
                     attrs[k] = norm

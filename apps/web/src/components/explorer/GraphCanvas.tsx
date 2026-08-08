@@ -7,9 +7,9 @@ import GraphPopup, { type GraphPopupInfo } from './GraphPopup'
 
 cytoscape.use(fcose)
 
-// Same gradient stops as kindred-main's SVG `bgGlow` radial gradient, ported
-// to a plain CSS background since cytoscape's canvas itself stays transparent.
-const CANVAS_BG = 'radial-gradient(65% 65% at 50% 45%, #0b1220 0%, #020617 100%)'
+// Soft light gradient behind the canvas — cytoscape's own canvas stays
+// transparent, so this is a plain CSS background underneath it.
+const CANVAS_BG = 'radial-gradient(65% 65% at 50% 45%, #ffffff 0%, #eef0f4 100%)'
 
 const STYLE: StylesheetStyle[] = [
   {
@@ -17,16 +17,16 @@ const STYLE: StylesheetStyle[] = [
     style: {
       'background-color': (ele: cytoscape.NodeSingular) => colorForTag(ele.data('tag')),
       label: 'data(label)',
-      color: '#cbd5e1',
+      color: '#334155',
       'font-size': 10,
       'text-valign': 'bottom',
       'text-margin-y': 6,
       width: 18,
       height: 18,
       'border-width': 1.5,
-      'border-color': 'rgba(255, 255, 255, 0.35)',
+      'border-color': 'rgba(30, 41, 59, 0.3)',
       'text-outline-width': 2,
-      'text-outline-color': '#05070d',
+      'text-outline-color': '#ffffff',
     },
   },
   {
@@ -69,15 +69,15 @@ const STYLE: StylesheetStyle[] = [
       // visibly stronger than a single shared email. Everything else has
       // weight 1 and renders exactly as it always did.
       width: (ele: cytoscape.EdgeSingular) => 1.5 + Math.min(Number(ele.data('weight')) || 1, 5) - 1,
-      'line-color': 'rgba(148, 163, 184, 0.45)',
-      'target-arrow-color': 'rgba(148, 163, 184, 0.6)',
+      'line-color': 'rgba(100, 116, 139, 0.55)',
+      'target-arrow-color': 'rgba(100, 116, 139, 0.7)',
       'target-arrow-shape': 'triangle',
       'arrow-scale': 0.8,
       'curve-style': 'bezier',
       label: 'data(edgeType)',
       'font-size': 8,
-      color: '#94a3b8',
-      'text-background-color': '#0a0e16',
+      color: '#334155',
+      'text-background-color': '#ffffff',
       'text-background-opacity': 0,
       'text-background-padding': '2px',
       'text-opacity': 0,
@@ -89,7 +89,7 @@ const STYLE: StylesheetStyle[] = [
     selector: 'edge.edge-spoke',
     style: {
       width: 1,
-      'line-color': 'rgba(148, 163, 184, 0.22)',
+      'line-color': 'rgba(100, 116, 139, 0.3)',
       'line-style': 'dashed',
       'target-arrow-shape': 'none',
     },
@@ -190,16 +190,17 @@ function layoutFreeNodes(cy: Core, pinned: Map<string, cytoscape.Position>, rand
   return elements.layout(fcoseLayoutOptions(randomize, spread) as unknown as cytoscape.LayoutOptions)
 }
 
-/** Move pinned nodes onto their given positions and lock them, so neither
- * the force layout nor a stray drag can pull an attribute out of its ring. */
+/** Move pinned nodes onto their given positions. They stay unlocked/
+ * draggable — the force layout still leaves them alone (it only ever runs
+ * over the free-node collection, built by excluding this same `pinned` map
+ * in layoutFreeNodes) — so a user's manual nudge sticks until the caller
+ * recomputes their position itself (e.g. the ring's parent moves). */
 function applyPinnedPositions(cy: Core, pinned: Map<string, cytoscape.Position>) {
   cy.batch(() => {
     for (const [id, position] of pinned) {
       const ele = cy.getElementById(id)
       if (ele.empty()) continue
-      ele.unlock()
       ele.position({ ...position })
-      ele.lock()
     }
   })
 }
@@ -226,12 +227,17 @@ interface Props {
   onToggleExpand: (vid: string) => void
   onZoomChange?: (zoom: number) => void
   /** Nodes the caller places itself — Investigation's radial attribute
-   * rings. These are excluded from the force layout and locked in place.
-   * Omit for the default behavior: everything is laid out by fcose. */
+   * rings. These are excluded from the force layout, though still
+   * draggable (see onChildMoved). Omit for the default behavior:
+   * everything is laid out by fcose. */
   pinnedPositions?: Map<string, cytoscape.Position>
   /** Fired while a hub node is dragged, so a caller pinning children
    * around it can keep the ring centred on its parent. */
   onParentMoved?: (vid: string, position: cytoscape.Position) => void
+  /** Fired while a pinned node itself (e.g. an attribute in a ring) is
+   * dragged, so a caller can remember the user's manual placement instead
+   * of snapping it back to the computed ring position. */
+  onChildMoved?: (vid: string, position: cytoscape.Position) => void
   /** Fired once the force layout settles, with where every node landed —
    * what a caller needs before it can place anything relative to them. */
   onPositionsSettled?: (positions: Map<string, cytoscape.Position>) => void
@@ -248,6 +254,7 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas(
     onZoomChange,
     pinnedPositions,
     onParentMoved,
+    onChildMoved,
     onPositionsSettled,
   },
   ref,
@@ -261,11 +268,13 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas(
   const onSelectRef = useRef(onSelect)
   const onToggleExpandRef = useRef(onToggleExpand)
   const onParentMovedRef = useRef(onParentMoved)
+  const onChildMovedRef = useRef(onChildMoved)
   const onPositionsSettledRef = useRef(onPositionsSettled)
   onPositionsSettledRef.current = onPositionsSettled
   onSelectRef.current = onSelect
   onToggleExpandRef.current = onToggleExpand
   onParentMovedRef.current = onParentMoved
+  onChildMovedRef.current = onChildMoved
 
   const emptyPinned = useMemo(() => new Map<string, cytoscape.Position>(), [])
   const pinnedNodes = pinnedPositions ?? emptyPinned
@@ -341,13 +350,17 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas(
       positionsRef.current.set(evt.target.id(), { ...evt.target.position() })
     })
     // A dragged hub carries its pinned children with it, so an attribute
-    // ring stays centred on the person it belongs to.
+    // ring stays centred on the person it belongs to. A dragged pinned node
+    // (an attribute already sitting in a ring) instead reports its own
+    // manual placement, so the caller can nudge it without the ring
+    // snapping it straight back.
     cy.on('drag', 'node', (evt) => {
-      const notify = onParentMovedRef.current
-      if (!notify) return
       const vid = evt.target.id()
-      if (pinnedPositionsRef.current.has(vid)) return
-      notify(vid, { ...evt.target.position() })
+      if (pinnedPositionsRef.current.has(vid)) {
+        onChildMovedRef.current?.(vid, { ...evt.target.position() })
+        return
+      }
+      onParentMovedRef.current?.(vid, { ...evt.target.position() })
     })
     cy.on('mouseover', 'node', (evt) => {
       if (!pinnedRef.current) setPopupInfo(nodePopupInfo(evt.target))

@@ -131,7 +131,12 @@ export const api = {
   getPersonNetwork: (
     entityId: string,
     degree = 1,
-    opts?: { connectors?: string[]; maxFanout?: number; maxPersons?: number },
+    opts?: {
+      connectors?: string[]
+      maxFanout?: number
+      maxPersons?: number
+      minConfidence?: number
+    },
   ) =>
     request<PersonNetwork>(
       `/api/entities/${encodeURIComponent(entityId)}/person-network${qs({
@@ -139,6 +144,7 @@ export const api = {
         connectors: opts?.connectors?.join(','),
         max_fanout: opts?.maxFanout,
         max_persons: opts?.maxPersons,
+        min_confidence: opts?.minConfidence,
       })}`,
     ),
   getEntityAttributes: (entityId: string) =>

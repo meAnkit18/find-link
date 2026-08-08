@@ -465,15 +465,18 @@ def step_write(evidence_id: str) -> tuple[int, int]:
         for fact in (f for f in facts if f.kind == "entity"):
             reg = db.get(EntityRegistry, fact.resolved_entity_id)
             if reg:
+                attributes = {**(reg.attributes or {}), "aliases": reg.aliases or []}
                 writer.upsert_entity(
                     tag=reg.type,
                     vid=reg.id,
                     name=reg.canonical_name,
-                    attributes={**(reg.attributes or {}), "aliases": reg.aliases or []},
+                    attributes=attributes,
                     confidence=reg.confidence,
                     evidence_id=evidence_id,
                 )
                 writer.link_supported_by(reg.id, evidence_id, fact.confidence)
+                if reg.type == "Person":
+                    writer.index_field_values(reg.id, attributes)
                 entities_written += 1
                 fact.status = "written"
                 db.add(fact)
@@ -494,6 +497,23 @@ def step_write(evidence_id: str) -> tuple[int, int]:
             edges_written += 1
             fact.status = "written"
             db.add(fact)
+
+        # A document's fields belong, for matching purposes, to the person who
+        # holds it: indexing them against the person is what lets two people's
+        # separate documents be compared without a four-hop traversal.
+        for fact in (f for f in facts if f.kind == "relationship"):
+            if fact.payload.get("type") != "HAS_DOCUMENT":
+                continue
+            document = db.get(EntityRegistry, fact.resolved_target_id)
+            if document is None:
+                continue
+            attributes = document.attributes or {}
+            writer.index_field_values(
+                fact.resolved_source_id,
+                attributes,
+                document_id=document.id,
+                document_type=str(attributes.get("document_type") or "document"),
+            )
 
         ev.status = "written"
         _log(

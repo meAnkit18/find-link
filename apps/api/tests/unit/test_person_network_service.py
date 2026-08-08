@@ -110,8 +110,11 @@ def test_degree_one_link_carries_the_shared_attribute_as_its_reason(shared_phone
             "connector_tag": "phone",
             "connector_label": "+91-111",
             "edge_types": ["HAS_PHONE"],
+            # weight_for("phone") == 0.8, rarity(2) == 1.0
+            "confidence": pytest.approx(0.8),
         }
     ]
+    assert link["confidence"] == pytest.approx(0.8)
 
 
 def test_degree_one_stops_at_one_connection(chain):
@@ -486,16 +489,33 @@ def test_isolated_person_returns_just_themselves():
 # -------------------------------------------------------------- attributes
 
 
-def test_attributes_lists_a_persons_own_details(shared_phone):
-    result = shared_phone.attributes("a")
+def test_attributes_lists_a_persons_own_details():
+    """Expanding a person shows their documents — a phone is still ingested
+    and still forms links, but it is not what a person opens into."""
+    service = make_service(
+        {
+            "a": person("Alice"),
+            "b": person("Bob"),
+            "doc:1": thing("document", "P1234567"),
+            "phone:1": thing("phone", "+91-111"),
+        },
+        [
+            ("a", "doc:1", "HAS_DOCUMENT"),
+            ("b", "doc:1", "HAS_DOCUMENT"),
+            ("a", "phone:1", "HAS_PHONE"),
+        ],
+    )
+    result = service.attributes("a")
     assert result["entity_id"] == "a"
     assert result["attributes"] == [
         {
-            "id": "phone:1",
-            "tag": "phone",
-            "label": "+91-111",
-            "edge_type": "HAS_PHONE",
-            "properties": {"label": "+91-111", "entity_type": "Phone"},
+            "id": "doc:1",
+            "tag": "document",
+            "label": "P1234567",
+            "edge_type": "HAS_DOCUMENT",
+            # `label` is dropped: it is already this attribute's title, so a
+            # property row repeating it is noise. See _INTERNAL_PROPS.
+            "properties": {"entity_type": "Document"},
             "shared_with": ["b"],
         }
     ]
@@ -503,10 +523,10 @@ def test_attributes_lists_a_persons_own_details(shared_phone):
 
 def test_attributes_excludes_other_people():
     service = make_service(
-        {"a": person("Alice"), "b": person("Bob"), "phone:1": thing("phone", "+91-111")},
-        [("a", "b", "RELATED_TO"), ("a", "phone:1", "HAS_PHONE")],
+        {"a": person("Alice"), "b": person("Bob"), "doc:1": thing("document", "P1234567")},
+        [("a", "b", "RELATED_TO"), ("a", "doc:1", "HAS_DOCUMENT")],
     )
-    assert [a["id"] for a in service.attributes("a")["attributes"]] == ["phone:1"]
+    assert [a["id"] for a in service.attributes("a")["attributes"]] == ["doc:1"]
 
 
 def test_attributes_of_a_person_with_none_is_empty():
@@ -518,15 +538,280 @@ def test_attributes_are_sorted_stably():
     service = make_service(
         {
             "a": person("Alice"),
-            "phone:1": thing("phone", "+91-111"),
-            "email:1": thing("email", "a@example.com"),
-            "address:1": thing("address", "12 Main St"),
+            "doc:pp": thing("document", "P1234567"),
+            "doc:eid": thing("document", "784199012345671"),
+            "doc:dl": thing("document", "DL-99"),
         },
         [
-            ("a", "phone:1", "HAS_PHONE"),
-            ("a", "email:1", "HAS_EMAIL"),
-            ("a", "address:1", "LOCATED_AT"),
+            ("a", "doc:pp", "HAS_DOCUMENT"),
+            ("a", "doc:eid", "HAS_DOCUMENT"),
+            ("a", "doc:dl", "HAS_DOCUMENT"),
         ],
     )
-    tags = [a["tag"] for a in service.attributes("a")["attributes"]]
-    assert tags == ["address", "email", "phone"]
+    labels = [a["label"] for a in service.attributes("a")["attributes"]]
+    assert labels == ["784199012345671", "DL-99", "P1234567"]
+
+
+# ------------------------------------------------------- property unpacking
+
+
+def test_props_json_blob_is_unpacked_into_real_fields():
+    """Entity attributes live in one JSON `props` string column, so without
+    unpacking the panel would show an opaque blob instead of the fields."""
+    service = make_service(
+        {
+            "a": {
+                "person": {
+                    "label": "Alice",
+                    "entity_type": "Person",
+                    "props": '{"nationality": "India", "dob": "1988-11-18"}',
+                }
+            }
+        },
+        [],
+    )
+    props = service.person_network("a", degree=1)["persons"][0]["properties"]
+    assert props["nationality"] == "India"
+    assert props["dob"] == "1988-11-18"
+    assert "props" not in props
+
+
+def test_storage_plumbing_is_hidden_from_properties():
+    service = make_service(
+        {
+            "a": {
+                "person": {
+                    "label": "Alice",
+                    "entity_type": "Person",
+                    "props": '{"aliases": [], "nationality": "India"}',
+                    "evidence_ids": '["ev-1"]',
+                    "created_at": 1754500000,
+                    "updated_at": 1754500000,
+                }
+            }
+        },
+        [],
+    )
+    props = service.person_network("a", degree=1)["persons"][0]["properties"]
+    assert props == {"entity_type": "Person", "nationality": "India"}
+
+
+def test_unparseable_props_does_not_break_the_payload():
+    service = make_service(
+        {"a": {"person": {"label": "Alice", "entity_type": "Person", "props": "not json"}}},
+        [],
+    )
+    network = service.person_network("a", degree=1)
+    assert network["persons"][0]["properties"] == {"entity_type": "Person"}
+
+
+# --------------------------------------------------------- field matching
+
+
+FIELD_VALUE = "HAS_FIELD_VALUE"
+
+
+def value_node(value: str) -> dict:
+    return {"field_value": {"label": value, "entity_type": "field_value"}}
+
+
+@pytest.fixture
+def shared_father_name():
+    """A and B have separate passports naming the same father."""
+    return make_service(
+        {
+            "a": person("Alice"),
+            "b": person("Bob"),
+            "value:father": value_node("ahmed al-mansouri"),
+        },
+        [
+            ("a", "value:father", FIELD_VALUE, {"field_key": "father_name"}),
+            ("b", "value:father", FIELD_VALUE, {"field_key": "father_name"}),
+        ],
+    )
+
+
+def test_matching_field_links_two_people(shared_father_name):
+    network = shared_father_name.person_network("a", degree=1)
+    assert set(ids(network)) == {"a", "b"}
+    assert link_pairs(network) == {("a", "b")}
+
+
+def test_matching_field_link_reports_why(shared_father_name):
+    network = shared_father_name.person_network("a", degree=1)
+    via = network["links"][0]["via"][0]
+    assert via["kind"] == "shared_field"
+    assert via["field_key"] == "father_name"
+    assert via["same_key"] is True
+    assert via["connector_label"] == "ahmed al-mansouri"
+
+
+def test_same_key_match_on_a_rare_value_is_confident(shared_father_name):
+    network = shared_father_name.person_network("a", degree=1)
+    # weight_for("father_name") == 0.7, rarity(2) == 1.0, same key
+    assert network["links"][0]["confidence"] == pytest.approx(0.7)
+
+
+def test_cross_key_match_is_penalised():
+    service = make_service(
+        {
+            "a": person("Alice"),
+            "b": person("Bob"),
+            "value:x": value_node("12 main st"),
+        },
+        [
+            ("a", "value:x", FIELD_VALUE, {"field_key": "address"}),
+            ("b", "value:x", FIELD_VALUE, {"field_key": "employer_address"}),
+        ],
+    )
+    network = service.person_network("a", degree=1)
+    via = network["links"][0]["via"][0]
+    assert via["same_key"] is False
+    # 0.7 * 1.0 * 0.6
+    assert network["links"][0]["confidence"] == pytest.approx(0.42)
+
+
+def test_two_matching_fields_compound():
+    service = make_service(
+        {
+            "a": person("Alice"),
+            "b": person("Bob"),
+            "value:father": value_node("ahmed"),
+            "value:addr": value_node("12 main st"),
+        },
+        [
+            ("a", "value:father", FIELD_VALUE, {"field_key": "father_name"}),
+            ("b", "value:father", FIELD_VALUE, {"field_key": "father_name"}),
+            ("a", "value:addr", FIELD_VALUE, {"field_key": "address"}),
+            ("b", "value:addr", FIELD_VALUE, {"field_key": "address"}),
+        ],
+    )
+    network = service.person_network("a", degree=1)
+    link = network["links"][0]
+    assert len(link["via"]) == 2
+    # noisy-OR of 0.7 and 0.7
+    assert link["confidence"] == pytest.approx(0.91)
+
+
+def test_a_value_shared_by_a_crowd_scores_low():
+    people = {f"p{i}": person(f"P{i}") for i in range(6)}
+    service = make_service(
+        {**people, "value:x": value_node("dubai")},
+        [(f"p{i}", "value:x", FIELD_VALUE, {"field_key": "city"}) for i in range(6)],
+    )
+    network = service.person_network("p0", degree=1)
+    # rarity(6) == 0.2, default weight 0.5 -> 0.1
+    assert network["links"][0]["confidence"] == pytest.approx(0.1)
+
+
+def test_field_values_chain_into_second_degree():
+    service = make_service(
+        {
+            "a": person("Alice"),
+            "b": person("Bob"),
+            "c": person("Carol"),
+            "value:1": value_node("ahmed"),
+            "value:2": value_node("12 main st"),
+        },
+        [
+            ("a", "value:1", FIELD_VALUE, {"field_key": "father_name"}),
+            ("b", "value:1", FIELD_VALUE, {"field_key": "father_name"}),
+            ("b", "value:2", FIELD_VALUE, {"field_key": "address"}),
+            ("c", "value:2", FIELD_VALUE, {"field_key": "address"}),
+        ],
+    )
+    assert degrees(service.person_network("a", degree=2)) == {"a": 0, "b": 1, "c": 2}
+    assert "c" not in ids(service.person_network("a", degree=1))
+
+
+# ------------------------------------------------------- confidence filter
+
+
+@pytest.fixture
+def weak_then_strong():
+    """A-B is a weak city match; B-C is a strong passport-number match."""
+    people = {f"p{i}": person(f"P{i}") for i in range(6)}
+    return make_service(
+        {
+            **people,
+            "a": person("Alice"),
+            "value:city": value_node("dubai"),
+            "value:pp": value_node("p1234567"),
+        },
+        [
+            ("a", "value:city", FIELD_VALUE, {"field_key": "city"}),
+            *[(f"p{i}", "value:city", FIELD_VALUE, {"field_key": "city"}) for i in range(6)],
+            ("p0", "value:pp", FIELD_VALUE, {"field_key": "passport_number"}),
+        ],
+    )
+
+
+def test_weak_links_survive_a_zero_threshold(weak_then_strong):
+    network = weak_then_strong.person_network("a", degree=1, min_confidence=0.0)
+    assert ("a", "p0") in link_pairs(network)
+
+
+def test_min_confidence_drops_weak_links(weak_then_strong):
+    network = weak_then_strong.person_network("a", degree=1, min_confidence=0.5)
+    assert link_pairs(network) == set()
+
+
+def test_a_dropped_link_is_not_a_stepping_stone(weak_then_strong):
+    """A confidence filter has to cut the path, not just hide one edge."""
+    network = weak_then_strong.person_network("a", degree=2, min_confidence=0.5)
+    assert ids(network) == ["a"]
+
+
+def test_min_confidence_keeps_strong_links(shared_father_name):
+    network = shared_father_name.person_network("a", degree=1, min_confidence=0.5)
+    assert link_pairs(network) == {("a", "b")}
+
+
+# ------------------------------------------------------- person expansion
+
+
+@pytest.fixture
+def person_with_everything():
+    return make_service(
+        {
+            "a": person("Alice"),
+            "doc:1": thing("document", "P1234567"),
+            "phone:1": thing("phone", "+91-111"),
+            "value:1": value_node("ahmed"),
+        },
+        [
+            ("a", "doc:1", "HAS_DOCUMENT"),
+            ("a", "phone:1", "HAS_PHONE"),
+            ("a", "value:1", FIELD_VALUE, {"field_key": "father_name"}),
+        ],
+    )
+
+
+def test_expanding_a_person_yields_only_documents(person_with_everything):
+    result = person_with_everything.attributes("a")
+    assert [a["tag"] for a in result["attributes"]] == ["document"]
+
+
+def test_expanding_a_person_never_leaks_index_vertices(person_with_everything):
+    """field_value vertices are an index, not something to draw."""
+    result = person_with_everything.attributes("a")
+    assert all(a["tag"] != "field_value" for a in result["attributes"])
+
+
+def test_matching_field_names_the_source_documents():
+    """A reason has to be auditable back to the document that stated it."""
+    service = make_service(
+        {
+            "a": person("Alice"),
+            "b": person("Bob"),
+            "value:father": value_node("ahmed"),
+        },
+        [
+            ("a", "value:father", FIELD_VALUE,
+             {"field_key": "father_name", "document_id": "doc:a"}),
+            ("b", "value:father", FIELD_VALUE,
+             {"field_key": "father_name", "document_id": "doc:b"}),
+        ],
+    )
+    via = service.person_network("a", degree=1)["links"][0]["via"][0]
+    assert via["document_ids"] == ["doc:a", "doc:b"]

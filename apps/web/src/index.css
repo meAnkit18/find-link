@@ -1,5 +1,5 @@
 @import './styles/tokens.css';
-@import './styles/graph-dark.css';
+@import './styles/graph-components.css';
 
 * {
   box-sizing: border-box;
@@ -52,7 +52,21 @@ a {
 
 /* ── Sidebar navigation ──────────────────────────────────────────── */
 
+/* Reserves the collapsed-width gutter in the flex layout. The sidebar
+   itself is positioned absolutely over this (see below) so expanding it on
+   hover overlays the page instead of reflowing app-main every time the
+   mouse crosses it. */
+.sidebar-rail {
+  width: 64px;
+  flex-shrink: 0;
+  height: 100%;
+}
+
 .sidebar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
   width: 184px;
   flex-shrink: 0;
   display: flex;
@@ -62,42 +76,22 @@ a {
   padding: var(--space-4) var(--space-3);
   overflow-y: auto;
   overflow-x: hidden;
-  transition: width 0.2s ease;
+  transition: width 0.2s ease, box-shadow 0.2s ease;
+  z-index: 20;
+  box-shadow: var(--shadow-float);
 }
 
 .sidebar--collapsed {
   width: 64px;
   padding-left: var(--space-2);
   padding-right: var(--space-2);
+  box-shadow: none;
 }
 
-.sidebar__toggle {
-  position: absolute;
-  top: 50%;
-  left: 184px;
-  transform: translate(-50%, -50%);
-  width: 22px;
-  height: 22px;
-  border-radius: 999px;
-  border: 1px solid var(--color-border);
-  background: var(--color-surface);
-  color: var(--color-text-muted);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0;
-  box-shadow: var(--shadow-card);
-  transition: left 0.2s ease, color 0.12s ease, border-color 0.12s ease;
-  z-index: 1;
-}
-
-.sidebar__toggle:hover {
-  color: var(--color-text);
-  border-color: var(--color-primary);
-}
-
-.sidebar__toggle--collapsed {
-  left: 64px;
+.sidebar--collapsed .sidebar__brand-name,
+.sidebar--collapsed .sidebar__link-label,
+.sidebar--collapsed .sidebar__section-label {
+  display: none;
 }
 
 .sidebar__brand {
@@ -412,9 +406,36 @@ a {
 }
 
 .explorer-topbar__search {
-  width: 360px;
+  width: 280px;
   max-width: 100%;
-  flex: 1 1 260px;
+  /* Grow factor 0: fills its allotted space at most, never stretches to
+     soak up whatever room the topbar has left on a wide screen. */
+  flex: 0 1 280px;
+}
+
+/* ── Compact search input — a leading icon instead of a wide bare field ── */
+
+.search-input-wrap {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+}
+
+.search-input-wrap__icon {
+  position: absolute;
+  top: 50%;
+  left: 10px;
+  transform: translateY(-50%);
+  color: var(--color-text-muted);
+  pointer-events: none;
+  display: flex;
+}
+
+.input--search {
+  width: 100%;
+  padding-top: 7px;
+  padding-bottom: 7px;
+  padding-left: 30px;
 }
 
 .explorer-layout {
@@ -429,6 +450,36 @@ a {
 .explorer-filter-panel {
   width: 220px;
   flex-shrink: 0;
+}
+
+/* ── Drag-to-resize handle between side panels and the canvas ──────── */
+
+.resize-handle {
+  flex: 0 0 6px;
+  width: 6px;
+  margin: 0 calc(var(--space-4) / -2);
+  cursor: col-resize;
+  position: relative;
+  z-index: 5;
+  touch-action: none;
+}
+
+.resize-handle::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 2px;
+  transform: translateX(-50%);
+  border-radius: 999px;
+  background: transparent;
+  transition: background-color 0.12s ease;
+}
+
+.resize-handle:hover::after,
+.resize-handle:active::after {
+  background: var(--color-primary);
 }
 
 .explorer-canvas {
@@ -516,6 +567,30 @@ a {
   overflow-y: auto;
 }
 
+/* Below this width there isn't room for canvas + detail side by side. The
+   right panel always has something worth showing (search hints when
+   nothing's selected, live details once something is), so — unlike
+   Explorer's transient overlay detail panel — it stays in normal flow,
+   stacked below the canvas rather than floating on top of it. */
+@media (max-width: 900px) {
+  .explorer-body {
+    flex-direction: column;
+    overflow-y: auto;
+  }
+
+  .explorer-center {
+    min-height: 360px;
+    flex: 1 1 420px;
+  }
+
+  .explorer-right {
+    width: 100%;
+    max-height: 50vh;
+    border-left: none;
+    border-top: 1px solid var(--color-border);
+  }
+}
+
 .panel {
   padding: var(--space-3);
 }
@@ -595,6 +670,62 @@ a {
   font-size: 12px;
   color: var(--color-text-muted);
   margin-bottom: var(--space-1);
+}
+
+/* A related-entity name that jumps to that entity's own detail view —
+   reads like plain bold text, not an obvious button, until hovered. */
+.link-button {
+  border: none;
+  background: none;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  font-weight: 700;
+  color: var(--color-text);
+  cursor: pointer;
+}
+
+.link-button:hover {
+  color: var(--color-primary);
+  text-decoration: underline;
+}
+
+/* ── Properties list — readable label/value rows for a node's raw data ── */
+
+.prop-list {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.prop-list__row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  padding: var(--space-2) 0;
+  border-bottom: 1px solid var(--color-border-soft);
+}
+
+.prop-list__row:last-child {
+  border-bottom: none;
+}
+
+.prop-list__key {
+  flex: 0 0 40%;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.prop-list__value {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  font-size: 13px;
+  color: var(--color-text);
+  word-break: break-word;
 }
 
 .btn-sm {
@@ -802,9 +933,9 @@ textarea.input {
 
 /* Graph exploration controls (zoom / fit / layout / fullscreen toolbar). */
 
-/* Layout only — colors/shape (rounded-full, glass) come from the
-   `.pill-toolbar` / `.pill-btn` / `.pill-divider` classes in graph-dark.css,
-   applied alongside these on the same elements. */
+/* Layout only — colors/shape (rounded-full) come from the
+   `.pill-toolbar` / `.pill-btn` / `.pill-divider` classes in
+   graph-components.css, applied alongside these on the same elements. */
 .graph-controls {
   position: absolute;
   top: var(--space-3);
@@ -838,13 +969,20 @@ textarea.input {
     flex-direction: column;
   }
 
+  .sidebar-rail {
+    display: none;
+  }
+
   .sidebar {
+    position: static;
     width: 100%;
+    height: auto;
     flex-direction: row;
     align-items: center;
     overflow-x: auto;
     border-right: none;
     border-bottom: 1px solid var(--color-border);
+    box-shadow: none;
   }
 
   .sidebar__brand {
@@ -865,7 +1003,10 @@ textarea.input {
     display: none;
   }
 
-  .sidebar__toggle {
-    display: none;
+  /* Touch devices have no hover, so the collapsed state must not hide
+     labels here — the desktop hover-to-expand affordance doesn't apply. */
+  .sidebar--collapsed .sidebar__brand-name,
+  .sidebar--collapsed .sidebar__link-label {
+    display: inline;
   }
 }
