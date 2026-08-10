@@ -94,6 +94,24 @@ def person_network(
     return network
 
 
+@router.get("/{entity_id}/connection/{target_id}")
+def find_connection(
+    entity_id: str,
+    target_id: str,
+    service: PersonNetworkService = Depends(get_person_network_service),
+):
+    result = service.find_connection(entity_id, target_id)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Person not found")
+    if result.get("error") == "same_person":
+        raise HTTPException(
+            status_code=400, detail="Source and target must be different people"
+        )
+    if result.get("error") == "target_not_found":
+        raise HTTPException(status_code=400, detail="Target person not found")
+    return result
+
+
 @router.get("/{entity_id}/attributes")
 def entity_attributes(
     entity_id: str,

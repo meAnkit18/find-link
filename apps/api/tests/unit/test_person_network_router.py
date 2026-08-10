@@ -21,6 +21,7 @@ def service():
             "a": {"person": {"label": "Alice", "entity_type": "Person"}},
             "b": {"person": {"label": "Bob", "entity_type": "Person"}},
             "doc:1": {"document": {"label": "P1234567", "entity_type": "Document"}},
+            "lonely": {"person": {"label": "Lonely", "entity_type": "Person"}},
         }
     )
     store.edges.extend(
@@ -74,6 +75,41 @@ def test_attributes_endpoint_returns_shared_details(api):
     body = api.get("/api/entities/a/attributes").json()
     assert body["attributes"][0]["id"] == "doc:1"
     assert body["attributes"][0]["shared_with"] == ["b"]
+
+
+def test_find_connection_returns_the_path(api):
+    response = api.get("/api/entities/a/connection/b")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["connected"] is True
+    assert [p["id"] for p in body["path"]["persons"]] == ["a", "b"]
+
+
+def test_find_connection_reports_not_connected(api):
+    response = api.get("/api/entities/a/connection/lonely")
+    assert response.status_code == 200
+    assert response.json() == {
+        "connected": False,
+        "source_id": "a",
+        "target_id": "lonely",
+        "max_degree_searched": 4,
+    }
+
+
+def test_find_connection_404s_on_an_unknown_source(api):
+    assert api.get("/api/entities/nobody/connection/a").status_code == 404
+
+
+def test_find_connection_400s_on_the_same_person(api):
+    assert api.get("/api/entities/a/connection/a").status_code == 400
+
+
+def test_find_connection_400s_on_an_unknown_target(api):
+    assert api.get("/api/entities/a/connection/nobody").status_code == 400
+
+
+def test_find_connection_400s_on_a_non_person_target(api):
+    assert api.get("/api/entities/a/connection/doc:1").status_code == 400
 
 
 def test_endpoints_503_when_the_intelligence_graph_is_unavailable():
