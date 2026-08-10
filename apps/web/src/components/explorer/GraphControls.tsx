@@ -35,24 +35,35 @@ export default function GraphControls({
 }: Props) {
   return (
     <>
-      <div className="graph-controls pill-toolbar" role="toolbar" aria-label="Graph controls">
+      <div
+        className="graph-controls pill-toolbar pill-toolbar--vertical"
+        role="toolbar"
+        aria-orientation="vertical"
+        aria-label="Graph controls"
+      >
         <InfoTooltip text="Zoom, fit, rearrange, save as an image, or view the graph full-screen. Hover any button to see what it does." />
         {onToggleView && (
           <>
             <div className="pill-divider" />
+            {/* Icon-only, like every other button here — the column stays
+                narrow, and the filled pill still says which view is live. */}
             <button
               className={`pill-btn${view === '3d' ? ' pill-btn--active' : ''}`}
               title="Switch to 3D view"
+              aria-label="Switch to 3D view"
+              aria-pressed={view === '3d'}
               onClick={() => view !== '3d' && onToggleView()}
             >
-              <Boxes size={14} /> 3D
+              <Boxes size={14} />
             </button>
             <button
               className={`pill-btn${view === '2d' ? ' pill-btn--active' : ''}`}
               title="Switch to 2D view"
+              aria-label="Switch to 2D view"
+              aria-pressed={view === '2d'}
               onClick={() => view !== '2d' && onToggleView()}
             >
-              <Network size={14} /> 2D
+              <Network size={14} />
             </button>
           </>
         )}

@@ -19,6 +19,10 @@ export default function ExplorerPage() {
   const [actionError, setActionError] = useState<string | null>(null)
   const [zoom, setZoom] = useState(1)
   const [isFullscreen, setIsFullscreen] = useState(false)
+  // Explorer has no root the way Investigation does, so the marked node is
+  // simply the last search hit — it stays marked until the next search, or
+  // until the user opens a different graph.
+  const [searchedVid, setSearchedVid] = useState<string | null>(null)
   const canvasRef = useRef<GraphCanvasHandle>(null)
   const filterPanel = useResizablePanel({
     defaultWidth: 220,
@@ -65,6 +69,7 @@ export default function ExplorerPage() {
     graphState.reset()
     setExpandingVids(new Set())
     setActionError(null)
+    setSearchedVid(null)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [graphId])
 
@@ -114,6 +119,7 @@ export default function ExplorerPage() {
         graphState.addNode(node)
       }
       select(result.vid)
+      setSearchedVid(result.vid)
       setActionError(null)
     } catch {
       setActionError(
@@ -217,6 +223,7 @@ export default function ExplorerPage() {
                   nodes={visibleNodes}
                   edges={visibleEdges}
                   selectedVid={selectedVid}
+                  rootVid={searchedVid}
                   mainTags={mainTags}
                   onSelect={select}
                   onToggleExpand={toggleExpand}

@@ -17,6 +17,60 @@ export const TAG_PALETTE = [
 export const EDGE_COLOR = '#64748b'
 export const SELECT_COLOR = '#0ea5e9'
 
+// The searched node — the root the rest of the graph hangs off. Kept
+// distinct from SELECT_COLOR on purpose: selection moves with every click,
+// while this marks one node for as long as the search stands, so the two
+// have to be tellable apart when they land on the same node. Brighter than
+// the palette's amber (#d97706) so a ring around a document still reads.
+export const ROOT_COLOR = '#f59e0b'
+
+// How many connections away from the searched person. Violet / teal /
+// crimson for 1st / 2nd / 3rd degree.
+//
+// Validated with the dataviz skill's checker against the canvas surface
+// (#f2f4f7, light): worst all-pairs colorblind separation is ΔE 14.8 —
+// comfortably past the 8.0 target — and all three clear the 3:1 contrast
+// floor, so a 3rd-degree arrow is as legible as a 1st-degree one. Do not
+// swap a hue here without re-running that check; a plausible-looking
+// alternative (indigo/teal/fuchsia) failed at ΔE 4.4 under protanopia.
+export const DEGREE_PALETTE = ['#7c3aed', '#0d9488', '#9f1239']
+
+/** Color for a 1st/2nd/3rd degree connection, or null for anything that
+ * isn't one — degree 0 (the root itself), attribute sub-nodes, and every
+ * node on the Explorer page, which has no notion of degree at all. Those
+ * keep their tag color. Degrees past the palette clamp to the last step
+ * rather than wrapping, so a deeper network can't recycle 1st-degree
+ * violet for the most distant people. */
+export function colorForDegree(degree: number | null): string | null {
+  if (degree === null || !Number.isFinite(degree) || degree < 1) return null
+  return DEGREE_PALETTE[Math.min(Math.round(degree), DEGREE_PALETTE.length) - 1]
+}
+
+/** The degree a node carries, or null if it has none. Investigation's
+ * person projection stamps this onto every person it returns. */
+export function nodeDegree(node: GraphNode): number | null {
+  const degree = Number(node.properties?.degree)
+  return Number.isFinite(degree) ? degree : null
+}
+
+/** The degree a link was discovered at, or null for a link that has none —
+ * notably the person-to-attribute spokes, which are structure rather than
+ * a connection at any distance. */
+export function edgeDegree(edge: GraphEdge): number | null {
+  const degree = Number(edge.properties?.degree)
+  return Number.isFinite(degree) ? degree : null
+}
+
+/** Whether this node/edge arrived with the most recent filter change —
+ * raising the degree, or relaxing the confidence threshold. Set by
+ * Investigation's data layer, absent everywhere else. Cleared on a new
+ * search, because then everything is new and marking it says nothing. */
+export function isNewSinceFilterChange(el: {
+  properties?: Record<string, unknown> | null
+}): boolean {
+  return el.properties?.is_new === true
+}
+
 export function colorForTag(tag: string): string {
   let hash = 0
   for (let i = 0; i < tag.length; i++) hash = (hash * 31 + tag.charCodeAt(i)) >>> 0

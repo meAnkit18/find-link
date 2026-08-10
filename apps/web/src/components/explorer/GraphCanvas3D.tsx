@@ -2,7 +2,19 @@ import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRe
 import ForceGraph3D, { type ForceGraphMethods, type NodeObject, type LinkObject } from 'react-force-graph-3d'
 import * as THREE from 'three'
 import type { GraphEdge, GraphNode } from '../../api/types'
-import { EDGE_COLOR, SELECT_COLOR, colorForTag, edgeLabel, roleForNode, type NodeRole } from './graphStyle'
+import {
+  EDGE_COLOR,
+  ROOT_COLOR,
+  SELECT_COLOR,
+  colorForDegree,
+  colorForTag,
+  edgeDegree,
+  edgeLabel,
+  isNewSinceFilterChange,
+  nodeDegree,
+  roleForNode,
+  type NodeRole,
+} from './graphStyle'
 import type { GraphCanvasHandle } from './GraphCanvas'
 import GraphPopup, { type GraphPopupInfo } from './GraphPopup'
 
@@ -13,6 +25,9 @@ interface Node3D {
   role: NodeRole
   color: string
   val: number
+  isRoot: boolean
+  /** Arrived with the last degree/confidence change. */
+  isNew: boolean
 }
 
 interface Link3D {
@@ -21,14 +36,27 @@ interface Link3D {
   source: string | Node3D
   target: string | Node3D
   label: string
+  /** Degree color for a person link, or the plain edge gray for an
+   * attribute spoke, which is at no degree at all. */
+  color: string
+  /** Arrived with the last degree/confidence change. */
+  isNew: boolean
 }
 
 interface Props {
   nodes: GraphNode[]
   edges: GraphEdge[]
   selectedVid: string | null
+  /** The node the user searched for — rendered larger with a gold halo and
+   * label for as long as that search stands. See GraphCanvas's prop of the
+   * same name; this is the 3D counterpart of its ring. */
+  rootVid?: string | null
   mainTags: Set<string>
   onSelect: (vid: string | null) => void
+  /** Fired on every link click, with the link's endpoints — the 3D
+   * counterpart of GraphCanvas's prop of the same name, so switching views
+   * doesn't switch off relationship selection. */
+  onSelectEdge?: (source: string, target: string) => void
   onToggleExpand: (vid: string) => void
   /** child node id -> the expanded parents it hangs off. Given these, the
    * children are held in a ring around their parent instead of being pushed
@@ -68,7 +96,15 @@ function roundRectPath(ctx: CanvasRenderingContext2D, x: number, y: number, w: n
   ctx.closePath()
 }
 
-function makeTextTexture(text: string, ink: string): { tex: THREE.CanvasTexture; aspect: number } {
+/** `dashed` draws the chip's outline as a heavier dashed rule — the 3D
+ * stand-in for the dashed node border the 2D canvas puts on nodes that
+ * arrived with the last filter change. There is no border to dash on a
+ * sphere, so the label chip carries the marking instead. */
+function makeTextTexture(
+  text: string,
+  ink: string,
+  dashed = false,
+): { tex: THREE.CanvasTexture; aspect: number } {
   const dpr = 2
   const fontPx = 30
   const padX = 13
@@ -87,10 +123,12 @@ function makeTextTexture(text: string, ink: string): { tex: THREE.CanvasTexture;
   ctx.fillStyle = 'rgba(255,255,255,0.85)'
   roundRectPath(ctx, 0.75, 0.75, w - 1.5, h - 1.5, h / 2)
   ctx.fill()
-  ctx.lineWidth = 1
-  ctx.strokeStyle = 'rgba(15,23,42,0.12)'
+  ctx.lineWidth = dashed ? 2.5 : 1
+  ctx.strokeStyle = dashed ? '#0f172a' : 'rgba(15,23,42,0.12)'
+  if (dashed) ctx.setLineDash([7, 5])
   roundRectPath(ctx, 0.75, 0.75, w - 1.5, h - 1.5, h / 2)
   ctx.stroke()
+  ctx.setLineDash([])
   ctx.font = font
   ctx.textBaseline = 'middle'
   ctx.textAlign = 'center'
@@ -130,7 +168,7 @@ function makeGlowTexture(color: string): THREE.CanvasTexture {
 }
 
 const GraphCanvas3D = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas3D(
-  { nodes, edges, selectedVid, mainTags, onSelect, onToggleExpand, ringParents },
+  { nodes, edges, selectedVid, rootVid, mainTags, onSelect, onSelectEdge, onToggleExpand, ringParents },
   ref,
 ) {
   const fgRef = useRef<ForceGraphMethods<Node3D, Link3D>>()
@@ -174,11 +212,33 @@ const GraphCanvas3D = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas3
     const graphNodes: Node3D[] = nodes.map((n) => {
       const role = roleForNode(n, mainTags)
       const tag = n.tags[0] ?? 'entity'
-      return { id: n.vid, label: n.label, tag, role, color: colorForTag(tag), val: role === 'main' ? 6 : 2 }
+      const isRoot = n.vid === rootVid
+      return {
+        id: n.vid,
+        label: n.label,
+        tag,
+        role,
+        // Degree first, tag color as the fallback — matching the 2D canvas,
+        // where a person is painted by how far out they are and everything
+        // without a degree keeps its tag color.
+        color: colorForDegree(nodeDegree(n)) ?? colorForTag(tag),
+        // The 3D stand-in for the 2D canvas's enlarged root: `val` drives
+        // the sphere radius, so the searched node reads as the biggest
+        // thing on screen from any camera angle.
+        val: isRoot ? 14 : role === 'main' ? 6 : 2,
+        isRoot,
+        isNew: isNewSinceFilterChange(n),
+      }
     })
-    const graphLinks: Link3D[] = edges.map((e) => ({ source: e.src, target: e.dst, label: edgeLabel(e) }))
+    const graphLinks: Link3D[] = edges.map((e) => ({
+      source: e.src,
+      target: e.dst,
+      label: edgeLabel(e),
+      color: colorForDegree(edgeDegree(e)) ?? EDGE_COLOR,
+      isNew: isNewSinceFilterChange(e),
+    }))
     return { nodes: graphNodes, links: graphLinks }
-  }, [nodes, edges, mainTags])
+  }, [nodes, edges, mainTags, rootVid])
 
   /** Each ring child's slot: which parents it hangs off, and its position
    * within that parent's ring. Sorted by id so the ring is stable across
@@ -304,11 +364,14 @@ const GraphCanvas3D = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas3
     const group = new THREE.Group()
     if (!node.label) return group
 
-    const ink = node.id === selectedVidRef.current ? SELECT_COLOR : node.color
-    const { tex, aspect } = makeTextTexture(node.label, ink)
+    // Root wins the label ink even while selected, mirroring the 2D canvas
+    // where the gold ring survives selection — the halo below is what
+    // switches to the selection accent instead.
+    const ink = node.isRoot ? ROOT_COLOR : node.id === selectedVidRef.current ? SELECT_COLOR : node.color
+    const { tex, aspect } = makeTextTexture(node.label, ink, node.isNew)
     textures.current.push(tex)
     const label = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false, opacity: 0.95 }))
-    const wh = node.role === 'main' ? 4.2 : 3.2
+    const wh = node.isRoot ? 5.6 : node.role === 'main' ? 4.2 : 3.2
     const radius = Math.cbrt(Math.max(0.1, node.val ?? 2)) * 4
     label.scale.set(wh * aspect, wh, 1)
     label.position.set(0, radius + wh * 0.5 + 1.8, 0)
@@ -317,8 +380,12 @@ const GraphCanvas3D = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas3
     group.add(label)
     nodeSprites.current.set(node.id, label)
 
-    if (node.role === 'main' || node.id === selectedVidRef.current) {
-      const color = node.id === selectedVidRef.current ? SELECT_COLOR : node.color
+    if (node.isRoot || node.role === 'main' || node.id === selectedVidRef.current) {
+      const color = node.id === selectedVidRef.current
+        ? SELECT_COLOR
+        : node.isRoot
+          ? ROOT_COLOR
+          : node.color
       let gt = glowTex.current.get(color)
       if (!gt) {
         gt = makeGlowTexture(color)
@@ -341,7 +408,7 @@ const GraphCanvas3D = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas3
   // manual raycast hack) so react-force-graph-3d's own onLinkHover/onLinkClick
   // keep working against the underlying line.
   const linkThreeObject = useCallback((link: LinkObject<Node3D, Link3D>) => {
-    const { tex, aspect } = makeTextTexture(link.label, EDGE_COLOR)
+    const { tex, aspect } = makeTextTexture(link.label, link.color ?? EDGE_COLOR)
     textures.current.push(tex)
     const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false, opacity: 0.9 })
     const wh = 2.6
@@ -384,7 +451,7 @@ const GraphCanvas3D = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas3
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', width: '100%', height: '100%' }}>
-      <div ref={wrapRef} style={{ position: 'relative', flex: 1, minHeight: 0, background: '#eef0f4' }}>
+      <div ref={wrapRef} className="graph-surface" style={{ position: 'relative', flex: 1, minHeight: 0, background: '#eef0f4' }}>
         <ForceGraph3D<Node3D, Link3D>
         ref={fgRef}
         graphData={graphData}
@@ -400,9 +467,11 @@ const GraphCanvas3D = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas3
         nodeResolution={14}
         nodeThreeObject={nodeThreeObject}
         nodeThreeObjectExtend={true}
-        linkColor={() => EDGE_COLOR}
+        linkColor={(link) => link.color ?? EDGE_COLOR}
         linkOpacity={0.55}
-        linkWidth={0.6}
+        // The 3D stand-in for the 2D canvas's dotted new-link style:
+        // three.js lines have no dash, so weight carries it instead.
+        linkWidth={(link) => (link.isNew ? 1.8 : 0.6)}
         linkThreeObject={linkThreeObject}
         linkThreeObjectExtend={true}
         linkPositionUpdate={linkPositionUpdate}
@@ -428,6 +497,13 @@ const GraphCanvas3D = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas3
           setPinned(true)
         }}
         onLinkClick={(link) => {
+          // The force graph replaces the string endpoints with node objects
+          // once the simulation has run, so either form can arrive here.
+          const source = typeof link.source === 'string' ? link.source : link.source?.id
+          const target = typeof link.target === 'string' ? link.target : link.target?.id
+          if (typeof source === 'string' && typeof target === 'string') {
+            onSelectEdge?.(source, target)
+          }
           setPopupInfo(linkPopupInfo(link))
           setPinned(true)
         }}

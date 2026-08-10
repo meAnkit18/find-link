@@ -2,7 +2,20 @@ import { useEffect, useImperativeHandle, useMemo, useRef, useState, forwardRef, 
 import cytoscape, { type Core, type ElementDefinition, type StylesheetStyle } from 'cytoscape'
 import fcose from 'cytoscape-fcose'
 import type { GraphEdge, GraphNode } from '../../api/types'
-import { EDGE_COLOR, SELECT_COLOR, colorForTag, edgeId, edgeLabel, edgeWeight, roleForNode } from './graphStyle'
+import {
+  EDGE_COLOR,
+  ROOT_COLOR,
+  SELECT_COLOR,
+  colorForDegree,
+  colorForTag,
+  edgeDegree,
+  edgeId,
+  edgeLabel,
+  edgeWeight,
+  isNewSinceFilterChange,
+  nodeDegree,
+  roleForNode,
+} from './graphStyle'
 import GraphPopup, { type GraphPopupInfo } from './GraphPopup'
 
 cytoscape.use(fcose)
@@ -11,11 +24,28 @@ cytoscape.use(fcose)
 // transparent, so this is a plain CSS background underneath it.
 const CANVAS_BG = 'radial-gradient(65% 65% at 50% 45%, #ffffff 0%, #eef0f4 100%)'
 
+// Fallbacks for anything with no degree of its own: Explorer's whole graph,
+// and Investigation's attribute spokes.
+const PLAIN_EDGE_COLOR = 'rgba(100, 116, 139, 0.55)'
+const PLAIN_ARROW_COLOR = 'rgba(100, 116, 139, 0.7)'
+
+/** What a node is painted. Investigation's people carry a degree and are
+ * colored by it; the root, the attribute sub-nodes, and every node on
+ * Explorer have none and keep their tag color.
+ *
+ * Takes the two values rather than the element, so each style entry below
+ * can stay an inline arrow — cytoscape's typings want the exact
+ * NodeSingular/EdgeSingular parameter per property and won't accept one
+ * shared signature. */
+function paintForNode(degreeColor: string, tag: string): string {
+  return degreeColor || colorForTag(tag)
+}
+
 const STYLE: StylesheetStyle[] = [
   {
     selector: 'node',
     style: {
-      'background-color': (ele: cytoscape.NodeSingular) => colorForTag(ele.data('tag')),
+      'background-color': (ele) => paintForNode(ele.data('degreeColor'), ele.data('tag')),
       label: 'data(label)',
       color: '#334155',
       'font-size': 10,
@@ -46,9 +76,25 @@ const STYLE: StylesheetStyle[] = [
     // standing in for kindred's SVG blur filter glow).
     selector: 'node[role = "main"]',
     style: {
-      'overlay-color': (ele) => colorForTag(ele.data('tag')),
+      'overlay-color': (ele) => paintForNode(ele.data('degreeColor'), ele.data('tag')),
       'overlay-opacity': 0.22,
       'overlay-padding': 10,
+    },
+  },
+  {
+    // Arrived with the last degree/confidence change. Marked with a dashed
+    // dark outline rather than another color: the fill is already carrying
+    // the degree, and "just appeared" is a temporary annotation on top of
+    // that, not a category of its own.
+    //
+    // Declared before :selected and .node-root so both still win the
+    // border — selection is what the user is doing right now, and the root
+    // is never new anyway (it's degree 0 and present in every projection).
+    selector: 'node.node-new',
+    style: {
+      'border-style': 'dashed',
+      'border-width': 2.5,
+      'border-color': '#0f172a',
     },
   },
   {
@@ -62,6 +108,45 @@ const STYLE: StylesheetStyle[] = [
     },
   },
   {
+    // The searched node — the root everything else on screen hangs off.
+    // Marked permanently rather than only while selected, because selection
+    // moves to whatever the user clicks next and the root has to stay
+    // findable after that. Deliberately declared after `node:selected` so
+    // the ring survives selection (see the combined rule below).
+    //
+    // The tag color stays on the fill so the legend keeps telling the truth
+    // — the ring, the size and the weight of the label carry "this is the
+    // one you searched for" instead.
+    selector: 'node.node-root',
+    style: {
+      width: 30,
+      height: 30,
+      'border-width': 4,
+      'border-color': ROOT_COLOR,
+      'overlay-color': ROOT_COLOR,
+      'overlay-opacity': 0.3,
+      'overlay-padding': 14,
+      'font-size': 13,
+      'font-weight': 'bold',
+      color: '#0f172a',
+      'text-margin-y': 9,
+      opacity: 1,
+      'z-index': 10,
+    },
+  },
+  {
+    // Root and selected at once — which is the state right after a search.
+    // Keep the gold ring that identifies the root and let the halo carry
+    // the selection accent, so neither signal is lost.
+    selector: 'node.node-root:selected',
+    style: {
+      'border-color': ROOT_COLOR,
+      'border-width': 4,
+      'overlay-color': SELECT_COLOR,
+      'overlay-opacity': 0.42,
+    },
+  },
+  {
     selector: 'edge',
     style: {
       // Investigation's person links carry a `weight` (how many separate
@@ -69,8 +154,11 @@ const STYLE: StylesheetStyle[] = [
       // visibly stronger than a single shared email. Everything else has
       // weight 1 and renders exactly as it always did.
       width: (ele: cytoscape.EdgeSingular) => 1.5 + Math.min(Number(ele.data('weight')) || 1, 5) - 1,
-      'line-color': 'rgba(100, 116, 139, 0.55)',
-      'target-arrow-color': 'rgba(100, 116, 139, 0.7)',
+      // Colored by which hop out from the searched person this link was
+      // found at, so 1st/2nd/3rd degree relationships read apart without
+      // having to trace the path back by eye.
+      'line-color': (ele) => ele.data('degreeColor') || PLAIN_EDGE_COLOR,
+      'target-arrow-color': (ele: cytoscape.EdgeSingular) => ele.data('degreeColor') || PLAIN_ARROW_COLOR,
       'target-arrow-shape': 'triangle',
       'arrow-scale': 0.8,
       'curve-style': 'bezier',
@@ -95,6 +183,22 @@ const STYLE: StylesheetStyle[] = [
     },
   },
   {
+    // The link half of the same "just appeared" marking. Dotted rather than
+    // dashed so it can't be read as an attribute spoke, and it keeps its
+    // degree color — this says when it arrived, not what it is. Declared
+    // after edge-spoke so a spoke can never pick it up, and before the
+    // hover/highlight rule so those still take over on interaction.
+    selector: 'edge.edge-new',
+    style: {
+      'line-style': 'dotted',
+      // Floor the width rather than fixing it: a dotted line needs some
+      // weight to read, but overwriting the width outright would throw away
+      // the via_count encoding on precisely the links being studied.
+      width: (ele: cytoscape.EdgeSingular) =>
+        Math.max(2.5, 1.5 + Math.min(Number(ele.data('weight')) || 1, 5) - 1),
+    },
+  },
+  {
     // Relationship labels are only shown on demand (hover, or touching the
     // selected node) — permanently-visible edge labels were the biggest
     // source of visual clutter on any graph with more than a few edges.
@@ -105,6 +209,23 @@ const STYLE: StylesheetStyle[] = [
       width: 2,
       'text-opacity': 1,
       'text-background-opacity': 0.85,
+    },
+  },
+  {
+    // The link whose details are open in the panel. Declared last so it wins
+    // over edge-highlight: both of a selected link's endpoints are also
+    // "touching a selected node" as far as that rule is concerned, and the
+    // one the user actually opened has to stand out from the pair.
+    selector: 'edge.edge-selected',
+    style: {
+      'line-color': SELECT_COLOR,
+      'target-arrow-color': SELECT_COLOR,
+      width: 4,
+      'overlay-color': SELECT_COLOR,
+      'overlay-opacity': 0.25,
+      'overlay-padding': 6,
+      'text-opacity': 1,
+      'text-background-opacity': 0.9,
     },
   },
 ]
@@ -154,19 +275,27 @@ function ensureAddedVisible(cy: Core, addedIds: string[]) {
  * defaults so nodes don't visually overlap once there are more than a
  * handful on screen.
  *
- * quality must track randomize: fcose only supports `randomize: false` with
- * quality "default"/"proof" (see its own README and the console warning it
- * logs for this exact combination) — pairing "draft" quality with
- * `randomize: false` makes it throw inside relocateComponent(), because
- * spectralResult is never populated when randomize is off. "draft" is fine,
- * and fast, for the initial full-graph layout (randomize: true); incremental
- * layouts that keep already-placed nodes fixed (every reveal/expand click
- * after the first render) need "default" instead. */
+ * quality stays "default" on every path. "draft" applies the spectral layout
+ * and nothing else — the force phase never runs, so nodeRepulsion and
+ * idealEdgeLength below are ignored and nothing pushes overlapping nodes
+ * apart. On a star-shaped graph (one searched person plus everyone they
+ * connect to) the spectral embedding piles the leaves on top of each other,
+ * which is what made a fresh search land as a squished clump until the first
+ * expansion happened to re-run the layout at "default".
+ *
+ * `randomize` still varies: true seeds from a spectral placement (a brand new
+ * graph, where the current coordinates mean nothing), false refines the
+ * positions already on screen (an expansion, where reshuffling everything
+ * would lose the picture the user is reading). Note fcose only supports
+ * `randomize: false` with quality "default"/"proof" — the pairing this
+ * function now always satisfies, where "draft" used to throw inside
+ * relocateComponent() because spectralResult is never populated with
+ * randomize off. */
 function fcoseLayoutOptions(randomize: boolean, spread = 1) {
   return {
     name: 'fcose',
     animate: false,
-    quality: randomize ? 'draft' : 'default',
+    quality: 'default',
     fit: false,
     nodeRepulsion: 12000 * spread,
     idealEdgeLength: 130 * spread,
@@ -218,10 +347,22 @@ interface Props {
   nodes: GraphNode[]
   edges: GraphEdge[]
   selectedVid: string | null
+  /** The node the user searched for. Ringed and enlarged for as long as
+   * that search stands, independently of `selectedVid` — selection follows
+   * every click, this doesn't. Omit for no root marking. */
+  rootVid?: string | null
   /** Tags that count as "main" hub nodes. Empty = no hierarchy — every
    * node renders identically (Explorer's default, unchanged behavior). */
   mainTags: Set<string>
   onSelect: (vid: string | null) => void
+  /** Fired on every edge tap, with the edge's two endpoints. The caller
+   * decides what that means — Investigation opens the relationship in its
+   * detail panel, and resolves a person-to-attribute spoke to the attribute
+   * instead. Omit to leave edges un-selectable (Explorer's behavior). */
+  onSelectEdge?: (source: string, target: string) => void
+  /** The link currently open in the caller's detail panel, so the arrow
+   * carrying it reads as selected. Endpoint order doesn't matter. */
+  selectedEdge?: { source: string; target: string } | null
   /** Fired on every node tap. The caller decides expand vs. collapse based
    * on its own expanded-state tracking (single click toggles both). */
   onToggleExpand: (vid: string) => void
@@ -248,8 +389,11 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas(
     nodes,
     edges,
     selectedVid,
+    rootVid,
     mainTags,
     onSelect,
+    onSelectEdge,
+    selectedEdge,
     onToggleExpand,
     onZoomChange,
     pinnedPositions,
@@ -266,6 +410,8 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas(
   // off-screen and re-running the layout.
   const positionsRef = useRef<Map<string, cytoscape.Position>>(new Map())
   const onSelectRef = useRef(onSelect)
+  const onSelectEdgeRef = useRef(onSelectEdge)
+  onSelectEdgeRef.current = onSelectEdge
   const onToggleExpandRef = useRef(onToggleExpand)
   const onParentMovedRef = useRef(onParentMoved)
   const onChildMovedRef = useRef(onChildMoved)
@@ -336,6 +482,7 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas(
       setPinned(true)
     })
     cy.on('tap', 'edge', (evt) => {
+      onSelectEdgeRef.current?.(evt.target.data('source'), evt.target.data('target'))
       setPopupInfo(edgePopupInfo(evt.target))
       setPinned(true)
     })
@@ -442,7 +589,6 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas(
     const cy = cyRef.current
     if (!cy) return
 
-    const hadNodesBefore = cy.nodes().length > 0
     const desiredNodeIds = new Set(nodes.map((n) => n.vid))
     const desiredEdgeIds = new Set(edges.map(edgeId))
 
@@ -467,7 +613,15 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas(
       const placed = pinnedNodes.get(n.vid) ?? positionsRef.current.get(n.vid)
       if (!placed) brandNewCount++
       newNodeEles.push({
-        data: { id: n.vid, label: n.label, tag: n.tags[0] ?? 'entity', role: roleForNode(n, mainTags) },
+        data: {
+          id: n.vid,
+          label: n.label,
+          tag: n.tags[0] ?? 'entity',
+          role: roleForNode(n, mainTags),
+          // '' rather than null so the style functions can treat "no degree"
+          // as plain falsy and fall through to the tag color.
+          degreeColor: colorForDegree(nodeDegree(n)) ?? '',
+        },
         ...(placed ? { position: { ...placed } } : {}),
       })
     }
@@ -481,6 +635,7 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas(
           target: e.dst,
           edgeType: edgeLabel(e),
           weight: edgeWeight(e),
+          degreeColor: colorForDegree(edgeDegree(e)) ?? '',
         },
         ...(pinnedNodes.has(e.src) || pinnedNodes.has(e.dst) ? { classes: 'edge-spoke' } : {}),
       }))
@@ -499,6 +654,18 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas(
       if (ele.empty()) continue
       const role = roleForNode(n, mainTags)
       if (ele.data('role') !== role) ele.data('role', role)
+      // Raising the degree control re-projects the network, and a person
+      // who was 2 hops out can come back as 1 — so this has to re-sync, not
+      // just be set once when the node is added.
+      const degreeColor = colorForDegree(nodeDegree(n)) ?? ''
+      if (ele.data('degreeColor') !== degreeColor) ele.data('degreeColor', degreeColor)
+      const isNew = isNewSinceFilterChange(n)
+      if (isNew !== ele.hasClass('node-new')) ele.toggleClass('node-new', isNew)
+      // Carried as a class rather than a data field: it's purely a styling
+      // flag, and toggleClass is a no-op when the value already matches,
+      // where `.data()` forces a style recalculation on every call.
+      const isRoot = n.vid === rootVid
+      if (isRoot !== ele.hasClass('node-root')) ele.toggleClass('node-root', isRoot)
     }
     for (const e of edges) {
       const ele = cy.getElementById(edgeId(e))
@@ -507,6 +674,10 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas(
       if (ele.data('edgeType') !== label) ele.data('edgeType', label)
       const weight = edgeWeight(e)
       if (ele.data('weight') !== weight) ele.data('weight', weight)
+      const degreeColor = colorForDegree(edgeDegree(e)) ?? ''
+      if (ele.data('degreeColor') !== degreeColor) ele.data('degreeColor', degreeColor)
+      const isNew = isNewSinceFilterChange(e)
+      if (isNew !== ele.hasClass('edge-new')) ele.toggleClass('edge-new', isNew)
       // An edge can gain a pinned endpoint after it was added (the user just
       // expanded one of its people), which turns it into an attribute spoke.
       const isSpoke = pinnedNodes.has(e.src) || pinnedNodes.has(e.dst)
@@ -521,6 +692,17 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas(
     const pinnedGrew = pinnedNodes.size > pinnedCountRef.current
     pinnedCountRef.current = pinnedNodes.size
 
+    // Whether there is anything on the canvas worth laying out *from*. This
+    // has to be read after the sync above, not before it: a new search prunes
+    // every old node and adds a whole new set, so looking at the canvas
+    // beforehand sees the outgoing graph and wrongly concludes there are
+    // positions to refine — leaving fcose to run its force phase over a pile
+    // of brand new nodes all stacked at (0, 0). Counted after cy.add, the
+    // survivors plus the nodes restored from the position cache are exactly
+    // the nodes that do have somewhere to start.
+    const positionedCount = cy.nodes().length - brandNewCount
+    const isFreshLayout = positionedCount === 0
+
     /** Cache where everything settled, re-seat the rings, and tell the
      * caller — which lets it recompute rings against the new positions. */
     const afterLayout = () => {
@@ -530,10 +712,10 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas(
     }
 
     if (brandNewCount > 0) {
-      const layout = layoutFreeNodes(cy, pinnedNodes, !hadNodesBefore)
+      const layout = layoutFreeNodes(cy, pinnedNodes, isFreshLayout)
       layout.one('layoutstop', () => {
         afterLayout()
-        if (!hadNodesBefore) fitToElements(cy)
+        if (isFreshLayout) fitToElements(cy)
         else {
           ensureGraphVisible(cy)
           ensureAddedVisible(cy, addedIds)
@@ -558,19 +740,32 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas(
         ensureAddedVisible(cy, addedIds)
       }
     }
-  }, [nodes, edges, mainTags, pinnedNodes])
+  }, [nodes, edges, mainTags, pinnedNodes, rootVid])
 
   useEffect(() => {
     const cy = cyRef.current
     if (!cy) return
     cy.nodes().unselect()
-    cy.edges().removeClass('edge-highlight')
+    cy.edges().removeClass('edge-highlight edge-selected')
     if (selectedVid) {
       const node = cy.getElementById(selectedVid)
       node.select()
       node.connectedEdges().addClass('edge-highlight')
     }
-  }, [selectedVid])
+    if (selectedEdge) {
+      // Matched by endpoints rather than by edge id: the panel identifies a
+      // projected link by the pair of people it joins, and the projection
+      // emits it in whichever direction it was found.
+      const { source, target } = selectedEdge
+      cy.edges()
+        .filter(
+          (ele) =>
+            (ele.data('source') === source && ele.data('target') === target) ||
+            (ele.data('source') === target && ele.data('target') === source),
+        )
+        .addClass('edge-selected')
+    }
+  }, [selectedVid, selectedEdge])
 
   // Tag breakdown for the bottom legend bar, mirroring kindred's persistent
   // node-kind legend (there it's a fixed 4-kind list; here tags are
@@ -578,19 +773,63 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas(
   const legend = useMemo(() => {
     const counts = new Map<string, number>()
     for (const n of nodes) {
+      // Only nodes actually painted by their tag belong in the tag half of
+      // the legend. Anything carrying a degree is painted by that instead,
+      // and is accounted for by `degreeLegend` below — without this the bar
+      // would swear "person" is pink while every person on screen is
+      // violet, teal or crimson.
+      if (nodeDegree(n) !== null) continue
       const tag = n.tags[0] ?? 'entity'
       counts.set(tag, (counts.get(tag) ?? 0) + 1)
     }
     return [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8)
   }, [nodes])
 
+  /** How many people sit at each distance from the searched person. Empty
+   * on Explorer, whose nodes carry no degree — which is what keeps the
+   * degree half of the legend off a page where it would mean nothing.
+   *
+   * This doubles as the relief the contrast check requires: the 3rd-degree
+   * hue clears 3:1 against the canvas, but naming the colors here is what
+   * stops degree from being encoded by color alone. */
+  const degreeLegend = useMemo(() => {
+    const counts = new Map<number, number>()
+    for (const n of nodes) {
+      const degree = nodeDegree(n)
+      if (degree === null) continue
+      counts.set(degree, (counts.get(degree) ?? 0) + 1)
+    }
+    return [...counts.entries()].sort((a, b) => a[0] - b[0])
+  }, [nodes])
+
+  /** How many people the last filter change brought in. Zero on a fresh
+   * search and on Explorer, which is what keeps the entry out of the bar
+   * unless it has something to say. */
+  const newCount = useMemo(() => nodes.filter(isNewSinceFilterChange).length, [nodes])
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', width: '100%', height: '100%' }}>
-      <div style={{ position: 'relative', flex: 1, minHeight: 0, background: CANVAS_BG }}>
+      <div className="graph-surface" style={{ position: 'relative', flex: 1, minHeight: 0, background: CANVAS_BG }}>
         <div ref={containerRef} style={{ width: '100%', height: '100%' }} />
         <GraphPopup info={popupInfo} pinned={pinned} onClose={closePopup} />
       </div>
       <div className="graph-legend">
+        {degreeLegend.map(([degree, count]) => (
+          <span key={`degree-${degree}`} className="graph-legend__item">
+            <span
+              className={`graph-legend__dot${degree === 0 ? ' graph-legend__dot--root' : ''}`}
+              style={{ background: colorForDegree(degree) ?? colorForTag('person') }}
+            />
+            {degree === 0 ? 'searched' : `${degree}° away`} ({count})
+          </span>
+        ))}
+        {newCount > 0 && (
+          <span className="graph-legend__item">
+            <span className="graph-legend__dot graph-legend__dot--new" />
+            new since last filter ({newCount})
+          </span>
+        )}
+        {degreeLegend.length > 0 && legend.length > 0 && <span className="graph-legend__divider" />}
         {legend.map(([tag, count]) => (
           <span key={tag} className="graph-legend__item">
             <span className="graph-legend__dot" style={{ background: colorForTag(tag) }} />

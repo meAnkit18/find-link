@@ -1,16 +1,21 @@
-import { useCallback, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { Position } from 'cytoscape'
 import { Search } from 'lucide-react'
 import { api } from '../api/client'
-import type { EntitySearchHit, PersonLink, PersonLinkVia, RiskResult } from '../api/types'
+import type { EntitySearchHit, RiskResult } from '../api/types'
 import JsonView from '../components/common/JsonView'
-import PropertiesList from '../components/common/PropertiesList'
 import InfoTooltip from '../components/common/InfoTooltip'
-import { humanizeLabel } from '../components/common/format'
 import GraphCanvas, { type GraphCanvasHandle } from '../components/explorer/GraphCanvas'
 import GraphCanvas3D from '../components/explorer/GraphCanvas3D'
 import GraphControls from '../components/explorer/GraphControls'
-import { colorForTag } from '../components/explorer/graphStyle'
+import DetailPanel from '../components/explorer/detail/DetailPanel'
+import { attributeNodeLabel } from '../components/explorer/attributeLabel'
+import {
+  buildFieldMatchIndex,
+  type DetailActions,
+  type DetailData,
+  type Selection,
+} from '../components/explorer/detail/detailModel'
 import { computeRadialPositions, type RadialChild } from '../components/explorer/radialLayout'
 import { usePersonNetworkState, PERSON_TAG } from '../hooks/usePersonNetworkState'
 import { useResizablePanel } from '../hooks/useResizablePanel'
@@ -18,33 +23,6 @@ import { useResizablePanel } from '../hooks/useResizablePanel'
 // People are the only primary nodes here: everything else on the canvas is
 // an attribute fanned out from a person the investigator clicked.
 const MAIN_TAGS = new Set([PERSON_TAG])
-
-export function riskColor(level: string): string {
-  switch (level) {
-    case 'high':
-      return '#c23b32'
-    case 'medium':
-      return '#b5720a'
-    default:
-      return '#1e8a5f'
-  }
-}
-
-function viaText(via: PersonLinkVia): string {
-  // Only a shared_attribute or a shared_field is something the two people
-  // have in common; the other kinds carry a ready sentence, and rendering
-  // them as "company: X" would claim they share X when they don't.
-  if (via.kind === 'shared_attribute') {
-    return `${via.connector_tag.replace(/_/g, ' ')}: ${via.connector_label}`
-  }
-  if (via.kind === 'shared_field') {
-    const keys = via.same_key
-      ? via.field_key.replace(/_/g, ' ')
-      : via.field_keys.map((k) => k.replace(/_/g, ' ')).join(' ↔ ')
-    return `matching ${keys}: “${via.connector_label}”`
-  }
-  return via.label
-}
 
 /** Investigation canvas: search a person, see who they're connected to
  * within 1/2/3 degrees and *why* (the shared phone, address, employer, ...),
@@ -73,7 +51,11 @@ export function InvestigationGraphPage() {
   const [searchError, setSearchError] = useState<string | null>(null)
 
   const [rootId, setRootId] = useState<string | null>(null)
-  const [selectedVid, setSelectedVid] = useState<string | null>(null)
+  // One selection covers all three kinds of subject the panel describes, so
+  // opening a relationship necessarily closes whichever node was open and
+  // vice versa — two independent states could show a person's profile beside
+  // a highlighted arrow that had nothing to do with it.
+  const [selection, setSelection] = useState<Selection | null>(null)
   const [degree, setDegree] = useState(1)
   const [minConfidence, setMinConfidence] = useState(0)
   const [zoom, setZoom] = useState(1)
@@ -185,7 +167,7 @@ export function InvestigationGraphPage() {
     setSearchResults([])
     setSearchQuery('')
     setRootId(hit.entity_id)
-    setSelectedVid(hit.entity_id)
+    setSelection({ kind: 'person', id: hit.entity_id })
     await loadNetwork(hit.entity_id, degree)
   }
 
@@ -214,11 +196,14 @@ export function InvestigationGraphPage() {
     }
   }
 
-  async function runShortestPath(targetId: string) {
-    if (!pathSource) return
-    setStatus(`Path ${pathSource} → ${targetId}…`)
+  /** `sourceId` defaults to the person the user parked as the path start;
+   * a relationship view passes both ends explicitly, since it already knows
+   * them and shouldn't make the user pick a start first. */
+  async function runShortestPath(targetId: string, sourceId: string | null = pathSource) {
+    if (!sourceId) return
+    setStatus(`Path ${sourceId} → ${targetId}…`)
     try {
-      setPathResult(await api.shortestPath(pathSource, targetId))
+      setPathResult(await api.shortestPath(sourceId, targetId))
       setStatus(null)
     } catch (err) {
       setStatus(`✗ ${(err as Error).message}`)
@@ -227,40 +212,61 @@ export function InvestigationGraphPage() {
     }
   }
 
-  const selectedPerson = selectedVid ? graph.personsById.get(selectedVid) ?? null : null
-  const selectedAttribute = useMemo(() => {
-    if (!selectedVid || selectedPerson) return null
-    for (const list of graph.attributes.values()) {
-      const found = list.find((a) => a.id === selectedVid)
-      if (found) return found
-    }
-    return null
-  }, [selectedVid, selectedPerson, graph.attributes])
-
-  const selectedLinks: PersonLink[] = selectedVid
-    ? graph.linksByPerson.get(selectedVid) ?? []
-    : []
-
-  // Nothing selected — the right panel falls back to an at-a-glance
-  // overview of everyone currently on the canvas, so there's still
-  // somewhere to see it all at once instead of having to click through
-  // each node individually.
-  const allPeople = useMemo(
-    () =>
-      [...graph.personsById.values()].sort((a, b) => a.degree - b.degree || a.label.localeCompare(b.label)),
+  /** Selecting by vid alone, for the callers that only have one: a canvas
+   * click, or a name clicked inside the panel. */
+  const openVid = useCallback(
+    (vid: string) => {
+      setSelection({ kind: graph.personsById.has(vid) ? 'person' : 'attribute', id: vid })
+    },
     [graph.personsById],
   )
-  const attributesByTag = useMemo(() => {
-    const byTag = new Map<string, typeof graph.canvasNodes>()
-    for (const node of graph.canvasNodes) {
-      if (graph.personsById.has(node.vid)) continue // people are listed separately, above
-      const tag = node.tags[0] ?? 'attribute'
-      const list = byTag.get(tag)
-      if (list) list.push(node)
-      else byTag.set(tag, [node])
+
+  /** A click on an arrow. A person-to-person arrow is a projected link and
+   * opens as one; a person-to-attribute spoke is not a finding at all, so it
+   * resolves to the attribute on its far end — which is what the user was
+   * pointing at. */
+  const handleSelectEdge = useCallback(
+    (source: string, target: string) => {
+      const sourceIsPerson = graph.personsById.has(source)
+      const targetIsPerson = graph.personsById.has(target)
+      if (sourceIsPerson && targetIsPerson) {
+        setSelection({ kind: 'link', source, target })
+        return
+      }
+      setSelection({ kind: 'attribute', id: sourceIsPerson ? target : source })
+    },
+    [graph.personsById],
+  )
+
+  const selectedVid = selection && selection.kind !== 'link' ? selection.id : null
+  const selectedEdge = useMemo(
+    () => (selection?.kind === 'link' ? { source: selection.source, target: selection.target } : null),
+    [selection],
+  )
+
+  // The panel describes a person by their documents, so those have to be
+  // loaded for whoever is selected — including someone reached by clicking a
+  // name in the panel, who was never expanded on the canvas. For an attribute
+  // it's the holders' records that are needed, which is what lets the panel
+  // answer "whose passport is this, and what else do they have".
+  //
+  // Destructured because the effect depends on these three, not on the whole
+  // graph state — every network reload would otherwise re-run it.
+  const { attributesById, personsById, ensureAttributes } = graph
+  useEffect(() => {
+    if (!selection) return
+    const wanted =
+      selection.kind === 'person'
+        ? [selection.id]
+        : selection.kind === 'attribute'
+          ? attributesById.get(selection.id)?.holders ?? []
+          : []
+    for (const personId of wanted) {
+      // ensureAttributes is a no-op for anything already cached or in
+      // flight, so re-running on every cache change settles immediately.
+      if (personsById.has(personId)) void ensureAttributes(personId)
     }
-    return [...byTag.entries()].sort((a, b) => b[1].length - a[1].length)
-  }, [graph.canvasNodes, graph.personsById])
+  }, [selection, attributesById, personsById, ensureAttributes])
 
   const notice = useMemo(() => {
     const parts: string[] = []
@@ -274,6 +280,57 @@ export function InvestigationGraphPage() {
     }
     return parts
   }, [graph.network])
+
+  /** Every label the panel can resolve: the people in the projection, plus
+   * every attribute fetched so far. A reason can cite a document on the far
+   * side of a match whose holder was never opened — those stay unresolved on
+   * purpose, and the panel shows the raw id rather than a dead link. */
+  const labelFor = useCallback(
+    (vid: string) => {
+      const person = graph.personsById.get(vid)
+      if (person) return person.label
+      const entry = graph.attributesById.get(vid)
+      return entry ? attributeNodeLabel(entry.attribute) : null
+    },
+    [graph.personsById, graph.attributesById],
+  )
+
+  const detailData = useMemo<DetailData>(
+    () => ({
+      personsById: graph.personsById,
+      links: graph.network?.links ?? [],
+      linksByPerson: graph.linksByPerson,
+      attributes: graph.attributes,
+      attributesById: graph.attributesById,
+      expanded: graph.expanded,
+      loadingAttributes: graph.loadingAttributes,
+      fieldMatches: buildFieldMatchIndex(graph.network?.links ?? []),
+      rootLabel: graph.personsById.get(graph.network?.root_id ?? '')?.label ?? 'the subject',
+    }),
+    [
+      graph.personsById,
+      graph.network,
+      graph.linksByPerson,
+      graph.attributes,
+      graph.attributesById,
+      graph.expanded,
+      graph.loadingAttributes,
+    ],
+  )
+
+  // Rebuilt every render on purpose: these close over state the panel has to
+  // see fresh (pathSource, the expanded set), and the panel isn't memoized,
+  // so a stable identity would buy nothing and could only go stale.
+  const detailActions: DetailActions = {
+    select: setSelection,
+    openVid,
+    labelFor,
+    toggleExpand: handleToggle,
+    fetchRisk: (personId) => void fetchRisk(personId),
+    setPathSource,
+    runPath: (targetId) => void runShortestPath(targetId),
+    tracePath: (sourceId, targetId) => void runShortestPath(targetId, sourceId),
+  }
 
   return (
     <main className="page page--flush explorer">
@@ -367,8 +424,14 @@ export function InvestigationGraphPage() {
               nodes={graph.canvasNodes}
               edges={graph.canvasEdges}
               selectedVid={selectedVid}
+              // The network's own root, not the `rootId` state: that is set
+              // the instant a result is picked, while this is the person the
+              // graph on screen was actually projected from.
+              rootVid={graph.network?.root_id ?? null}
               mainTags={MAIN_TAGS}
-              onSelect={setSelectedVid}
+              onSelect={(vid) => (vid ? openVid(vid) : setSelection(null))}
+              onSelectEdge={handleSelectEdge}
+              selectedEdge={selectedEdge}
               onToggleExpand={handleToggle}
               onZoomChange={setZoom}
               pinnedPositions={pinnedPositions}
@@ -382,8 +445,10 @@ export function InvestigationGraphPage() {
               nodes={graph.canvasNodes}
               edges={graph.canvasEdges}
               selectedVid={selectedVid}
+              rootVid={graph.network?.root_id ?? null}
               mainTags={MAIN_TAGS}
-              onSelect={setSelectedVid}
+              onSelect={(vid) => (vid ? openVid(vid) : setSelection(null))}
+              onSelectEdge={handleSelectEdge}
               onToggleExpand={handleToggle}
               ringParents={graph.attributeParents}
             />
@@ -426,205 +491,15 @@ export function InvestigationGraphPage() {
           className="explorer-right"
           style={detailPanel.isDesktop ? { width: detailPanel.width } : undefined}
         >
-          {selectedPerson ? (
-            <div className="panel stack">
-              <div>
-                <h3 style={{ marginBottom: 4 }}>{selectedPerson.label}</h3>
-                <div className="row" style={{ flexWrap: 'wrap', gap: 'var(--space-1)' }}>
-                  <span className="tag-chip">
-                    <span className="tag-dot" style={{ background: colorForTag(PERSON_TAG) }} />
-                    {selectedPerson.entity_type}
-                  </span>
-                </div>
-              </div>
-              <p className="text-secondary mono">{selectedPerson.id}</p>
-              <p className="text-secondary">
-                {selectedPerson.degree === 0
-                  ? 'The person you searched for'
-                  : `${selectedPerson.degree} degree${selectedPerson.degree === 1 ? '' : 's'} from ${
-                      graph.personsById.get(graph.network?.root_id ?? '')?.label ?? 'the subject'
-                    }`}
-              </p>
-
-              <div className="row" style={{ flexWrap: 'wrap' }}>
-                <button
-                  className="btn btn--primary"
-                  onClick={() => handleToggle(selectedPerson.id)}
-                  disabled={graph.loadingAttributes.has(selectedPerson.id)}
-                >
-                  {graph.loadingAttributes.has(selectedPerson.id)
-                    ? 'Loading…'
-                    : graph.expanded.has(selectedPerson.id)
-                      ? 'Hide details'
-                      : 'Show details'}
-                </button>
-                <InfoTooltip text="Fan this person's own details (phone, email, address, passport, ...) out in a ring around them." />
-                <button className="btn" onClick={() => fetchRisk(selectedPerson.id)}>
-                  Risk
-                </button>
-                <InfoTooltip text="Calculate a risk score for this person based on their connections and known flags." />
-                {pathSource && pathSource !== selectedPerson.id ? (
-                  <button className="btn" onClick={() => runShortestPath(selectedPerson.id)}>
-                    Path from {pathSource.slice(0, 12)}… → here
-                  </button>
-                ) : (
-                  <button className="btn" onClick={() => setPathSource(selectedPerson.id)}>
-                    Path: set as source
-                  </button>
-                )}
-                <InfoTooltip text="Find the shortest chain of connections between two people. Pick a starting point here, then click another person." />
-              </div>
-
-              {selectedLinks.length > 0 && (
-                <div className="stack">
-                  <h4>Why connected</h4>
-                  <ul className="risk-factors">
-                    {selectedLinks.map((link) => {
-                      const otherId = link.source === selectedPerson.id ? link.target : link.source
-                      const other = graph.personsById.get(otherId)
-                      return (
-                        <li key={`${link.source}|${link.target}`}>
-                          <button className="link-button" onClick={() => setSelectedVid(otherId)}>
-                            {other?.label ?? otherId}
-                          </button>
-                          <span className="muted"> · {link.confidence.toFixed(2)}</span>
-                          <div className="mono muted">
-                            {link.via.map(viaText).join(' · ')}
-                          </div>
-                        </li>
-                      )
-                    })}
-                  </ul>
-                </div>
-              )}
-
-              {risk && risk.entity_id === selectedPerson.id && (
-                <div className="risk-section">
-                  <h4>Risk assessment</h4>
-                  <div className="risk-badge" style={{ background: riskColor(risk.level), color: '#fff' }}>
-                    {risk.level.toUpperCase()} · {risk.score.toFixed(2)}
-                  </div>
-                  {risk.factors.length > 0 && (
-                    <ul className="risk-factors">
-                      {risk.factors.map((f, i) => (
-                        <li key={i}>{f.explanation}</li>
-                      ))}
-                    </ul>
-                  )}
-                </div>
-              )}
-
-              <h4>Properties</h4>
-              <PropertiesList properties={selectedPerson.properties} />
-            </div>
-          ) : selectedAttribute ? (
-            <div className="panel stack">
-              <div>
-                <h3 style={{ marginBottom: 4 }}>{selectedAttribute.label}</h3>
-                <div className="row" style={{ flexWrap: 'wrap', gap: 'var(--space-1)' }}>
-                  <span className="tag-chip">
-                    <span className="tag-dot" style={{ background: colorForTag(selectedAttribute.tag) }} />
-                    {selectedAttribute.tag.replace(/_/g, ' ')}
-                  </span>
-                </div>
-              </div>
-              <p className="text-secondary mono">{selectedAttribute.id}</p>
-              {selectedAttribute.shared_with.length > 0 ? (
-                <div className="stack">
-                  <h4>Shared with</h4>
-                  <ul className="risk-factors">
-                    {selectedAttribute.shared_with.map((personId) => (
-                      <li key={personId}>
-                        <button className="link-button" onClick={() => setSelectedVid(personId)}>
-                          {graph.personsById.get(personId)?.label ?? personId}
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              ) : (
-                <p className="text-secondary">Held by this person alone.</p>
-              )}
-              <h4>Properties</h4>
-              <PropertiesList properties={selectedAttribute.properties} />
-            </div>
-          ) : graph.network ? (
-            <div className="panel stack">
-              <div>
-                <h3 style={{ marginBottom: 4 }}>Everyone on this canvas</h3>
-                <p className="text-secondary">
-                  Nothing selected — here's everything currently shown. Click a person or
-                  a detail below (or on the canvas) to see its full profile.
-                </p>
-              </div>
-
-              <div className="stack">
-                <h4>People ({allPeople.length})</h4>
-                <div className="stack" style={{ gap: 4 }}>
-                  {allPeople.map((person) => (
-                    <button
-                      key={person.id}
-                      className="list-item"
-                      onClick={() => setSelectedVid(person.id)}
-                    >
-                      <div className="row" style={{ justifyContent: 'space-between', gap: 'var(--space-2)' }}>
-                        <strong>{person.label}</strong>
-                        <span className="badge">
-                          {person.degree === 0 ? 'root' : `${person.degree}°`}
-                        </span>
-                      </div>
-                      <div className="mono muted" style={{ fontSize: 11 }}>
-                        {person.entity_type}
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {attributesByTag.length > 0 && (
-                <div className="stack">
-                  <h4>Details shown</h4>
-                  <div className="stack">
-                    {attributesByTag.map(([tag, tagNodes]) => (
-                      <div key={tag}>
-                        <span className="tag-chip" style={{ marginBottom: 4 }}>
-                          <span className="tag-dot" style={{ background: colorForTag(tag) }} />
-                          {humanizeLabel(tag)} ({tagNodes.length})
-                        </span>
-                        <div className="stack" style={{ gap: 4, marginTop: 4 }}>
-                          {tagNodes.map((node) => (
-                            <button
-                              key={node.vid}
-                              className="list-item"
-                              onClick={() => setSelectedVid(node.vid)}
-                            >
-                              {node.label}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-          ) : (
-            <div className="panel">
-              <h3>Investigation tools</h3>
-              <p className="text-secondary">
-                Search for a person and pick a result. The canvas then shows the other
-                people they're connected to — two people are connected when they share
-                something (a phone, an email, an address, a passport, an employer) or
-                have a direct relationship. "Degree" controls how far that chain runs:
-                1 is a direct share, 2 is a friend of a friend, 3 one step further.
-              </p>
-              <p className="text-secondary">
-                Click any person to fan their own details out in a ring around them, and
-                click again to fold them back in. Click a link to see exactly what the
-                two people have in common.
-              </p>
-            </div>
-          )}
+          <DetailPanel
+            selection={selection}
+            network={graph.network}
+            canvasNodes={graph.canvasNodes}
+            data={detailData}
+            actions={detailActions}
+            risk={risk}
+            pathSource={pathSource}
+          />
 
           {pathResult !== null && (
             <div className="panel">

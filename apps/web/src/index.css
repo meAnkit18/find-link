@@ -331,11 +331,12 @@ a {
   user-select: none;
 }
 
+/* Positioned with `top`/`left` computed in JS from the icon's own rect (see
+   InfoTooltip.tsx) and rendered through a portal into `document.body`, so it
+   escapes every panel's `overflow: hidden`/`auto` instead of being clipped
+   by whichever one happens to be its nearest ancestor. */
 .info-tooltip__popover {
-  position: absolute;
-  bottom: calc(100% + 8px);
-  left: 50%;
-  transform: translateX(-50%) translateY(4px);
+  position: fixed;
   width: max-content;
   max-width: 240px;
   background: var(--color-text);
@@ -350,27 +351,38 @@ a {
   visibility: hidden;
   pointer-events: none;
   transition: opacity 0.12s ease, transform 0.12s ease;
-  z-index: 50;
+  transform: translateY(4px);
+  z-index: 1000;
   text-transform: none;
   letter-spacing: normal;
 }
 
-.info-tooltip__popover::after {
-  content: '';
+.info-tooltip__popover--bottom {
+  transform: translateY(-4px);
+}
+
+.info-tooltip__popover--open {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0);
+}
+
+.info-tooltip__arrow {
   position: absolute;
-  top: 100%;
-  left: 50%;
   transform: translateX(-50%);
+  width: 0;
+  height: 0;
   border: 5px solid transparent;
+}
+
+.info-tooltip__popover--top .info-tooltip__arrow {
+  top: 100%;
   border-top-color: var(--color-text);
 }
 
-.info-tooltip:hover .info-tooltip__popover,
-.info-tooltip:focus-within .info-tooltip__popover,
-.info-tooltip:focus .info-tooltip__popover {
-  opacity: 1;
-  visibility: visible;
-  transform: translateX(-50%) translateY(0);
+.info-tooltip__popover--bottom .info-tooltip__arrow {
+  bottom: 100%;
+  border-bottom-color: var(--color-text);
 }
 
 .spinner {
@@ -482,12 +494,17 @@ a {
   background: var(--color-primary);
 }
 
+/* Still a `.card` for its background, but the rounded border and shadow now
+   come from `.graph-surface` inside it — keeping the card's own would draw a
+   second line a pixel outside the first. */
 .explorer-canvas {
   flex: 1;
   min-width: 0;
   padding: 0;
   overflow: hidden;
   position: relative;
+  border: none;
+  box-shadow: none;
 }
 
 /* Message shown on top of the canvas (all-filtered-out / empty graph)
@@ -552,18 +569,42 @@ a {
   overflow-y: auto;
 }
 
+/* Investigation's canvas column. The padding insets the rounded graph
+   surface from the panel edges so its corners actually read; the matching
+   `--graph-inset` keeps the floating toolbar and zoom readout the same
+   distance inside the surface as they sit on the unpadded Explorer page. */
 .explorer-center {
   flex: 1;
   min-width: 0;
   position: relative;
   overflow: hidden;
+  padding: var(--space-3);
+  --graph-inset: calc(var(--space-3) * 2);
 }
 
+/* The detail column. It holds no padding and does no scrolling of its own:
+   the detail panel inside it keeps a fixed header over a scrolling body, so
+   the entity you're reading about — and its tabs — never scroll away. */
 .explorer-right {
   width: 340px;
   flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
   border-left: 1px solid var(--color-border);
+  overflow: hidden;
+}
+
+.explorer-right > .detail-panel {
+  flex: 1;
+  min-height: 0;
+}
+
+/* The help card and the shortest-path result are plain blocks rather than
+   panels with their own scroller, so they keep the column's padding. */
+.explorer-right > .panel {
   padding: var(--space-4);
+  flex: 0 1 auto;
   overflow-y: auto;
 }
 
@@ -585,7 +626,10 @@ a {
 
   .explorer-right {
     width: 100%;
-    max-height: 50vh;
+    /* Stacked under the canvas, the column needs a height for the panel's
+       inner scroller to have anything to scroll within. */
+    flex: 0 0 auto;
+    height: 50vh;
     border-left: none;
     border-top: 1px solid var(--color-border);
   }
@@ -935,18 +979,23 @@ textarea.input {
 
 /* Layout only — colors/shape (rounded-full) come from the
    `.pill-toolbar` / `.pill-btn` / `.pill-divider` classes in
-   graph-components.css, applied alongside these on the same elements. */
+   graph-components.css, applied alongside these on the same elements.
+
+   `--graph-inset` is how far these float inside the rounded canvas surface.
+   It defaults to a bare gap and is overridden by any container that pads
+   the canvas away from its own edges (see `.explorer-center`), so the
+   toolbar lands the same distance inside the surface on every page. */
 .graph-controls {
   position: absolute;
-  top: var(--space-3);
-  right: var(--space-3);
+  top: var(--graph-inset, var(--space-3));
+  left: var(--graph-inset, var(--space-3));
   z-index: 10;
 }
 
 .graph-zoom-indicator {
   position: absolute;
-  bottom: var(--space-3);
-  left: var(--space-3);
+  bottom: var(--graph-inset, var(--space-3));
+  right: var(--graph-inset, var(--space-3));
   z-index: 10;
   padding: 2px var(--space-2);
   font-size: 11px;

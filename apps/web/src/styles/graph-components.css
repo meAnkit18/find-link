@@ -51,6 +51,42 @@
   margin: 2px 1px;
 }
 
+/* Stacked variant used over the graph canvas: the toolbar runs down the
+   left edge, so every button is icon-only and the dividers turn into
+   horizontal rules between groups. */
+.pill-toolbar--vertical {
+  flex-direction: column;
+}
+
+.pill-toolbar--vertical .pill-btn {
+  padding: 7px 8px;
+}
+
+.pill-toolbar--vertical .pill-divider {
+  width: auto;
+  height: 1px;
+  margin: 1px 2px;
+}
+
+/* The ⓘ sits at the top of a column pinned to the canvas's left edge. Its
+   popover now portals into `document.body` and positions itself off the
+   icon's own rect (see InfoTooltip.tsx), so it no longer needs a
+   container-specific override to dodge the canvas's `overflow: hidden` —
+   only the icon's own spacing is worth adjusting here. */
+.pill-toolbar--vertical .info-tooltip {
+  margin-left: 0;
+}
+
+/* The graph drawing surface itself (2D and 3D alike) — a rounded card the
+   canvas is clipped to. `overflow: hidden` is what actually rounds it:
+   cytoscape and three.js both paint into absolutely-positioned canvases
+   that ignore the radius on their own. */
+.graph-surface {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+
 .tag-chip {
   display: inline-flex;
   align-items: center;
@@ -181,6 +217,582 @@
   pointer-events: none;
 }
 
+/* ═══════════════════════════════════════════════════════════════════════
+   Detail panel — Investigation's right-hand column.
+
+   Structure: a fixed header (what you're looking at, plus the tab strip)
+   over a scrolling body (one tab's content). The header never scrolls, so
+   the subject of the panel is always on screen — clicking through a graph
+   means constantly re-checking "whose passport am I reading".
+   ═══════════════════════════════════════════════════════════════════════ */
+
+.detail-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  background: var(--color-surface);
+}
+
+.detail-panel__header {
+  position: relative;
+  flex: 0 0 auto;
+  padding: var(--space-4) var(--space-4) 0;
+  border-bottom: 1px solid var(--color-border);
+}
+
+/* The eyebrow: what *kind* of thing this is. Reads before the title, because
+   on a graph the type is the first thing you need — "Passport" tells you how
+   to read the number underneath it. */
+.detail-panel__kind {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--color-text-muted);
+}
+
+.detail-panel__title {
+  margin: var(--space-1) 0 0;
+  font-size: 17px;
+  font-weight: 650;
+  line-height: 1.25;
+  color: var(--color-text);
+  word-break: break-word;
+  /* Room for the close button, which is absolutely placed top-right. */
+  padding-right: 28px;
+}
+
+.detail-panel__subtitle {
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--color-text-muted);
+  word-break: break-all;
+}
+
+.detail-panel__chips,
+.detail-panel__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1);
+  margin-top: var(--space-2);
+}
+
+.detail-panel__actions {
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+
+.detail-panel__close {
+  position: absolute;
+  top: var(--space-3);
+  right: var(--space-3);
+  border: none;
+  background: transparent;
+  color: var(--color-text-muted);
+  border-radius: var(--radius-sm);
+  padding: 2px 5px;
+  line-height: 1;
+}
+
+.detail-panel__close:hover {
+  background: var(--color-surface-muted);
+  color: var(--color-text);
+}
+
+.detail-panel__body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--space-4);
+}
+
+.detail-panel__body:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: -2px;
+}
+
+/* ── Tab strip ── */
+
+.detail-tabs {
+  display: flex;
+  gap: var(--space-1);
+  margin-top: var(--space-3);
+  /* A person with a Risk tab can overflow a narrow panel; scroll the strip
+     rather than wrapping it into two rows that shift the body down. */
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.detail-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.detail-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: 0 0 auto;
+  border: none;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--color-text-muted);
+  font-size: 12px;
+  font-weight: 600;
+  padding: var(--space-2) var(--space-2);
+  margin-bottom: -1px;
+  white-space: nowrap;
+}
+
+.detail-tab:hover {
+  color: var(--color-text);
+}
+
+.detail-tab--active {
+  color: var(--color-primary);
+  border-bottom-color: var(--color-primary);
+}
+
+.detail-tab__count {
+  font-size: 10.5px;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 999px;
+  background: var(--color-surface-muted);
+  color: var(--color-text-muted);
+}
+
+.detail-tab--active .detail-tab__count {
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
+}
+
+/* ── Sections inside a tab ── */
+
+.detail-section + .detail-section,
+.holder-block + .holder-block {
+  margin-top: var(--space-5);
+}
+
+.holder-block + .holder-block {
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--color-border);
+}
+
+.detail-section__head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+}
+
+.detail-section__title {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-text-muted);
+}
+
+.detail-section__hint {
+  margin: calc(var(--space-1) * -1) 0 var(--space-2);
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--color-text-muted);
+}
+
+.detail-empty {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--color-text-muted);
+}
+
+.detail-callout {
+  font-size: 12.5px;
+  line-height: 1.5;
+  padding: var(--space-3);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-border);
+  background: var(--color-surface-muted);
+  color: var(--color-text-muted);
+}
+
+.detail-callout--warn {
+  border-color: #f0d9ae;
+  background: var(--color-warning-soft);
+  color: #7a4e05;
+}
+
+.detail-callout + .detail-callout,
+.detail-callout + .detail-section {
+  margin-top: var(--space-3);
+}
+
+/* ── Label/value rows ── */
+
+.field-row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  padding: var(--space-2) 0;
+  border-bottom: 1px solid var(--color-border-soft);
+}
+
+.field-row:last-child {
+  border-bottom: none;
+}
+
+.field-row__key {
+  flex: 0 0 38%;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--color-text-muted);
+}
+
+.field-row__value {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  color: var(--color-text);
+  word-break: break-word;
+}
+
+/* A field that produced a match is the reason the reader opened this record,
+   so it gets a left rule and a warm ground rather than an easily-missed
+   annotation. */
+.field-row--flagged {
+  border-left: 2px solid var(--color-warning);
+  background: var(--color-warning-soft);
+  margin-left: -6px;
+  padding-left: 6px;
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+}
+
+.field-row__flag {
+  display: block;
+  margin-top: 3px;
+}
+
+.match-flag {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 3px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: #7a4e05;
+}
+
+/* ── Clickable entity rows ── */
+
+.entity-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  width: 100%;
+  text-align: left;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-raised);
+  color: var(--color-text);
+  transition: border-color 0.12s ease, background-color 0.12s ease;
+}
+
+.entity-row + .entity-row,
+.tag-group .entity-row {
+  margin-top: var(--space-1);
+}
+
+.entity-row:hover:not(:disabled) {
+  border-color: var(--color-primary);
+  background: var(--color-primary-soft);
+}
+
+.entity-row:disabled {
+  cursor: default;
+  color: var(--color-text-muted);
+}
+
+.entity-row__main {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.entity-row__name {
+  font-size: 13px;
+  font-weight: 600;
+  word-break: break-word;
+}
+
+.entity-row__meta {
+  font-size: 11px;
+  color: var(--color-text-muted);
+  word-break: break-word;
+}
+
+.entity-row__right {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  flex-shrink: 0;
+}
+
+.tag-group + .tag-group {
+  margin-top: var(--space-3);
+}
+
+.tag-group .tag-chip {
+  margin-bottom: var(--space-1);
+}
+
+.holder-block__actions {
+  margin-top: var(--space-3);
+}
+
+/* ── One connection: who, how sure, and why ── */
+
+.connection-card {
+  padding: var(--space-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+}
+
+.connection-card + .connection-card {
+  margin-top: var(--space-2);
+}
+
+.connection-card .entity-row {
+  border: none;
+  background: transparent;
+  padding: var(--space-1) var(--space-2);
+}
+
+.connection-card__reasons {
+  padding: 0 var(--space-2) var(--space-2);
+  margin-top: var(--space-1);
+}
+
+/* ── One reason, in full — the audit trail behind a link ── */
+
+.reason-card {
+  padding: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-left: 3px solid var(--color-primary);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+}
+
+.reason-card + .reason-card {
+  margin-top: var(--space-2);
+}
+
+.reason-card__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.reason-card__kind {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-primary);
+}
+
+.reason-card__detail {
+  margin: var(--space-1) 0 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--color-text);
+}
+
+.reason-card__nodes,
+.reason-card__sources {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1);
+  margin-top: var(--space-2);
+}
+
+.reason-card__sources-label {
+  font-size: 10.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-text-muted);
+}
+
+.reason-card .meter {
+  margin-top: var(--space-3);
+}
+
+/* A connector node a reason rests on, openable from inside the reason. */
+.node-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border-radius: 999px;
+  border: 1px solid var(--color-border);
+  background: var(--color-surface-muted);
+  color: var(--color-text);
+  padding: 3px 10px;
+  font-size: 11.5px;
+  font-weight: 600;
+  max-width: 100%;
+  word-break: break-all;
+}
+
+.node-chip:hover {
+  border-color: var(--color-primary);
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
+}
+
+/* A cited node the canvas doesn't have — shown, but not pretending to be a
+   link to somewhere. */
+.node-chip--static {
+  color: var(--color-text-muted);
+  font-weight: 400;
+  cursor: default;
+}
+
+.node-chip--static:hover {
+  border-color: var(--color-border);
+  background: var(--color-surface-muted);
+  color: var(--color-text-muted);
+}
+
+/* ── Confidence meter ── */
+
+.meter__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2);
+  margin-bottom: 5px;
+}
+
+.meter__label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-text-muted);
+}
+
+.meter__value {
+  font-size: 12px;
+  font-weight: 700;
+}
+
+/* Confidence bands. Green/amber/grey rather than a single hue ramp: an
+   investigator acts differently on each band, so they're categories. */
+.meter__value--strong {
+  color: var(--color-success);
+}
+
+.meter__value--moderate {
+  color: var(--color-warning);
+}
+
+.meter__value--weak {
+  color: var(--color-text-muted);
+}
+
+.meter__track {
+  height: 5px;
+  border-radius: 999px;
+  background: var(--color-surface-muted);
+  overflow: hidden;
+}
+
+.meter__fill {
+  height: 100%;
+  border-radius: 999px;
+  transition: width 0.2s ease;
+}
+
+.meter__fill--strong {
+  background: var(--color-success);
+}
+
+.meter__fill--moderate {
+  background: var(--color-warning);
+}
+
+.meter__fill--weak {
+  background: #9aa3b2;
+}
+
+/* ── Copyable identifier ── */
+
+.copy-value {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  max-width: 100%;
+}
+
+.copy-value__btn {
+  display: inline-flex;
+  align-items: center;
+  border: none;
+  background: transparent;
+  color: var(--color-text-muted);
+  padding: 2px;
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+
+.copy-value__btn:hover {
+  background: var(--color-surface-muted);
+  color: var(--color-text);
+}
+
+/* An inline text action inside a row of facts ("Why connected →"). */
+.link-inline {
+  border: none;
+  background: none;
+  padding: 0;
+  font: inherit;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--color-primary);
+}
+
+.link-inline:hover {
+  text-decoration: underline;
+}
+
+/* Chips that carry a state rather than a category, and the shared-record
+   warning badge. */
+.tag-chip--active {
+  border-color: var(--color-primary);
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
+}
+
+.badge--warn {
+  border-color: #f0d9ae;
+  background: var(--color-warning-soft);
+  color: #7a4e05;
+}
+
 /* ── Bottom legend bar — persistent tag/count strip under the graph
    canvas ── */
 
@@ -209,6 +821,30 @@
   height: 8px;
   border-radius: 50%;
   flex-shrink: 0;
+}
+
+/* The searched person's swatch: its fill is the tag color it keeps on the
+   canvas, ringed in the root accent — the same two-part mark the node
+   itself wears, so the legend entry is recognisably that node. */
+.graph-legend__dot--root {
+  box-shadow: 0 0 0 2px var(--color-surface), 0 0 0 3.5px #f59e0b;
+}
+
+/* Mirrors the dashed outline the newly-arrived nodes wear on the canvas. */
+.graph-legend__dot--new {
+  background: transparent;
+  border: 1.5px dashed #0f172a;
+  width: 10px;
+  height: 10px;
+}
+
+/* Separates the degree swatches from the tag swatches — two different
+   encodings sharing one bar, so they shouldn't read as one list. */
+.graph-legend__divider {
+  width: 1px;
+  align-self: stretch;
+  margin: 0 2px;
+  background: var(--color-border);
 }
 
 .graph-legend__spacer {
