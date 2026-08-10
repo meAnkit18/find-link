@@ -2,6 +2,7 @@ import type {
   CancelEvidenceResponse,
   CaseCreated,
   CaseSummary,
+  ConnectionResult,
   DeleteEvidenceResponse,
   Direction,
   EntityAttributes,
@@ -146,6 +147,12 @@ export const api = {
         max_persons: opts?.maxPersons,
         min_confidence: opts?.minConfidence,
       })}`,
+    ),
+  /** The strongest chain connecting two people within 4 degrees, or a
+   * "not connected" result. */
+  findConnection: (sourceId: string, targetId: string) =>
+    request<ConnectionResult>(
+      `/api/entities/${encodeURIComponent(sourceId)}/connection/${encodeURIComponent(targetId)}`,
     ),
   getEntityAttributes: (entityId: string) =>
     request<EntityAttributes>(`/api/entities/${encodeURIComponent(entityId)}/attributes`),

@@ -193,6 +193,18 @@ export interface PersonNetwork {
   connectors: { direct: string[]; shared: string[] }
 }
 
+/** The result of asking whether two people are connected, and if so, how.
+ * `path` reuses PersonNode/PersonLink, so the same reason-rendering the
+ * Connections tab already does works here unchanged. */
+export type ConnectionResult =
+  | { connected: false; source_id: string; target_id: string; max_degree_searched: number }
+  | {
+      connected: true
+      source_id: string
+      target_id: string
+      path: { persons: PersonNode[]; links: PersonLink[]; confidence: number }
+    }
+
 export interface EntityAttribute {
   id: string
   tag: string
