@@ -24,14 +24,13 @@ interface Props {
   data: DetailData
   actions: DetailActions
   risk: RiskResult | null
-  pathSource: string | null
   isRoot: boolean
 }
 
 /** Everything known about one person, in the order an investigator asks for
  * it: who they are, who they're connected to and why, what's on record, what
  * the risk model makes of them. */
-export default function PersonDetail({ person, data, actions, risk, pathSource, isRoot }: Props) {
+export default function PersonDetail({ person, data, actions, risk, isRoot }: Props) {
   const links = [...(data.linksByPerson.get(person.id) ?? [])].sort(
     (a, b) => b.confidence - a.confidence,
   )
@@ -197,8 +196,6 @@ export default function PersonDetail({ person, data, actions, risk, pathSource, 
     { id: 'raw', label: 'Raw', content: raw },
   ]
 
-  const isPathSource = pathSource === person.id
-
   return (
     <DetailShell
       kind="Person"
@@ -212,7 +209,6 @@ export default function PersonDetail({ person, data, actions, risk, pathSource, 
             {person.entity_type}
           </span>
           <span className="tag-chip">{isRoot ? 'searched person' : `${person.degree}° away`}</span>
-          {isPathSource && <span className="tag-chip tag-chip--active">path start</span>}
         </>
       }
       actions={
@@ -232,19 +228,6 @@ export default function PersonDetail({ person, data, actions, risk, pathSource, 
           <button className="btn btn-sm" onClick={() => actions.fetchRisk(person.id)}>
             Risk
           </button>
-          {pathSource && pathSource !== person.id ? (
-            <button className="btn btn-sm" onClick={() => actions.runPath(person.id)}>
-              Path to here
-            </button>
-          ) : (
-            <button
-              className="btn btn-sm"
-              onClick={() => actions.setPathSource(isPathSource ? null : person.id)}
-            >
-              {isPathSource ? 'Cancel path' : 'Path from here'}
-            </button>
-          )}
-          <InfoTooltip text="Find the shortest chain of connections between two people. Set a start here, then open another person and pick 'Path to here'." />
         </>
       }
       onClose={() => actions.select(null)}

@@ -107,14 +107,6 @@ export default function LinkDetail({ link, data, actions }: Props) {
           </span>
         </>
       }
-      actions={
-        <button
-          className="btn btn-sm"
-          onClick={() => actions.tracePath(link.source, link.target)}
-        >
-          Trace path between them
-        </button>
-      }
       onClose={() => actions.select(null)}
       tabs={tabs}
     />

@@ -12,7 +12,6 @@ interface Props {
   data: DetailData
   actions: DetailActions
   risk: RiskResult | null
-  pathSource: string | null
 }
 
 /** Picks the view for what's selected. One place decides "person or
@@ -28,7 +27,6 @@ export default function DetailPanel({
   data,
   actions,
   risk,
-  pathSource,
 }: Props) {
   const key = selectionKey(selection)
 
@@ -42,7 +40,6 @@ export default function DetailPanel({
           data={data}
           actions={actions}
           risk={risk}
-          pathSource={pathSource}
           isRoot={person.id === network?.root_id}
         />
       )

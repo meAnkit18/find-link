@@ -35,10 +35,6 @@ export interface DetailActions {
   labelFor: (vid: string) => string | null
   toggleExpand: (personId: string) => void
   fetchRisk: (personId: string) => void
-  setPathSource: (personId: string | null) => void
-  runPath: (targetId: string) => void
-  /** Shortest path between two named people, without the two-click dance. */
-  tracePath: (sourceId: string, targetId: string) => void
 }
 
 /** What the right panel is currently describing.

@@ -3,7 +3,6 @@ import type { Position } from 'cytoscape'
 import { Search } from 'lucide-react'
 import { api } from '../api/client'
 import type { EntitySearchHit, RiskResult } from '../api/types'
-import JsonView from '../components/common/JsonView'
 import InfoTooltip from '../components/common/InfoTooltip'
 import GraphCanvas, { type GraphCanvasHandle } from '../components/explorer/GraphCanvas'
 import GraphCanvas3D from '../components/explorer/GraphCanvas3D'
@@ -26,8 +25,9 @@ const MAIN_TAGS = new Set([PERSON_TAG])
 
 /** Investigation canvas: search a person, see who they're connected to
  * within 1/2/3 degrees and *why* (the shared phone, address, employer, ...),
- * click any person to fan their own details out in a ring around them, and
- * run shortest-path between two picked people. */
+ * and click any person to fan their own details out in a ring around them.
+ * A second mode searches two people by name and finds the strongest chain
+ * connecting them directly, without exploring first. */
 export function InvestigationGraphPage() {
   const graph = usePersonNetworkState()
   const [view, setView] = useState<'2d' | '3d'>('2d')
@@ -61,8 +61,6 @@ export function InvestigationGraphPage() {
   const [zoom, setZoom] = useState(1)
   const [isFullscreen, setIsFullscreen] = useState(false)
   const [risk, setRisk] = useState<RiskResult | null>(null)
-  const [pathSource, setPathSource] = useState<string | null>(null)
-  const [pathResult, setPathResult] = useState<unknown>(null)
   const [status, setStatus] = useState<string | null>(null)
 
   // Where the force layout put each person. Attribute rings are placed
@@ -196,22 +194,6 @@ export function InvestigationGraphPage() {
     }
   }
 
-  /** `sourceId` defaults to the person the user parked as the path start;
-   * a relationship view passes both ends explicitly, since it already knows
-   * them and shouldn't make the user pick a start first. */
-  async function runShortestPath(targetId: string, sourceId: string | null = pathSource) {
-    if (!sourceId) return
-    setStatus(`Path ${sourceId} → ${targetId}…`)
-    try {
-      setPathResult(await api.shortestPath(sourceId, targetId))
-      setStatus(null)
-    } catch (err) {
-      setStatus(`✗ ${(err as Error).message}`)
-    } finally {
-      setPathSource(null)
-    }
-  }
-
   /** Selecting by vid alone, for the callers that only have one: a canvas
    * click, or a name clicked inside the panel. */
   const openVid = useCallback(
@@ -319,17 +301,14 @@ export function InvestigationGraphPage() {
   )
 
   // Rebuilt every render on purpose: these close over state the panel has to
-  // see fresh (pathSource, the expanded set), and the panel isn't memoized,
-  // so a stable identity would buy nothing and could only go stale.
+  // see fresh (the expanded set), and the panel isn't memoized, so a stable
+  // identity would buy nothing and could only go stale.
   const detailActions: DetailActions = {
     select: setSelection,
     openVid,
     labelFor,
     toggleExpand: handleToggle,
     fetchRisk: (personId) => void fetchRisk(personId),
-    setPathSource,
-    runPath: (targetId) => void runShortestPath(targetId),
-    tracePath: (sourceId, targetId) => void runShortestPath(targetId, sourceId),
   }
 
   return (
@@ -498,17 +477,7 @@ export function InvestigationGraphPage() {
             data={detailData}
             actions={detailActions}
             risk={risk}
-            pathSource={pathSource}
           />
-
-          {pathResult !== null && (
-            <div className="panel">
-              <JsonView data={pathResult} title="shortest-path result" />
-              <button className="btn" onClick={() => setPathResult(null)}>
-                Clear
-              </button>
-            </div>
-          )}
         </div>
       </div>
     </main>
