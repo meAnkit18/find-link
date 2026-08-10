@@ -2,8 +2,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { Position } from 'cytoscape'
 import { Search } from 'lucide-react'
 import { api } from '../api/client'
-import type { EntitySearchHit, RiskResult } from '../api/types'
+import type { ConnectionResult, EntitySearchHit, RiskResult } from '../api/types'
 import InfoTooltip from '../components/common/InfoTooltip'
+import ConnectionChainView from '../components/explorer/connection/ConnectionChainView'
+import PersonSearchField from '../components/explorer/connection/PersonSearchField'
 import GraphCanvas, { type GraphCanvasHandle } from '../components/explorer/GraphCanvas'
 import GraphCanvas3D from '../components/explorer/GraphCanvas3D'
 import GraphControls from '../components/explorer/GraphControls'
@@ -49,6 +51,13 @@ export function InvestigationGraphPage() {
   const [searchQuery, setSearchQuery] = useState('')
   const [searchResults, setSearchResults] = useState<EntitySearchHit[]>([])
   const [searchError, setSearchError] = useState<string | null>(null)
+
+  const [mode, setMode] = useState<'explore' | 'connect'>('explore')
+  const [personA, setPersonA] = useState<EntitySearchHit | null>(null)
+  const [personB, setPersonB] = useState<EntitySearchHit | null>(null)
+  const [connectionResult, setConnectionResult] = useState<ConnectionResult | null>(null)
+  const [connectionLoading, setConnectionLoading] = useState(false)
+  const [connectionError, setConnectionError] = useState<string | null>(null)
 
   const [rootId, setRootId] = useState<string | null>(null)
   // One selection covers all three kinds of subject the panel describes, so
@@ -167,6 +176,29 @@ export function InvestigationGraphPage() {
     setRootId(hit.entity_id)
     setSelection({ kind: 'person', id: hit.entity_id })
     await loadNetwork(hit.entity_id, degree)
+  }
+
+  async function handleFindConnection() {
+    if (!personA || !personB) return
+    setConnectionLoading(true)
+    setConnectionError(null)
+    setConnectionResult(null)
+    try {
+      setConnectionResult(await api.findConnection(personA.entity_id, personB.entity_id))
+    } catch (err) {
+      setConnectionError((err as Error).message)
+    } finally {
+      setConnectionLoading(false)
+    }
+  }
+
+  /** The bridge back to Explore mode from a chain-view person card — reuses
+   * the same network load Explore's own search result picker triggers. */
+  async function handleExploreFromConnection(personId: string) {
+    setMode('explore')
+    setRootId(personId)
+    setSelection({ kind: 'person', id: personId })
+    await loadNetwork(personId, degree)
   }
 
   async function handleDegreeChange(next: number) {
@@ -314,81 +346,122 @@ export function InvestigationGraphPage() {
   return (
     <main className="page page--flush explorer">
       <div className="explorer-topbar">
-        <div className="row" style={{ flex: '0 0 auto' }}>
+        <div className="row" style={{ flex: '0 0 auto', gap: 'var(--space-2)' }}>
           <strong>Investigation</strong>
-        </div>
-        <div className="explorer-topbar__search" style={{ position: 'relative' }}>
           <div className="row" style={{ gap: 'var(--space-1)' }}>
-            <div className="search-input-wrap">
-              <Search className="search-input-wrap__icon" size={14} />
-              <input
-                className="input input--search"
-                placeholder="Search for a person…"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
-              />
-            </div>
-            <button className="btn btn--primary btn-sm" onClick={handleSearch}>
-              Search
+            <button
+              className={`btn btn-sm${mode === 'explore' ? ' btn--primary' : ''}`}
+              onClick={() => setMode('explore')}
+            >
+              Explore
+            </button>
+            <button
+              className={`btn btn-sm${mode === 'connect' ? ' btn--primary' : ''}`}
+              onClick={() => setMode('connect')}
+            >
+              Verify connection
             </button>
           </div>
-          {searchResults.length > 0 && (
-            <div className="card search-dropdown">
-              {searchResults.map((hit) => (
-                <button
-                  key={hit.entity_id}
-                  className="list-item"
-                  onClick={() => handleSelectResult(hit)}
-                >
-                  <strong>{hit.label || hit.entity_id}</strong>
-                  <div className="mono muted">
-                    {hit.entity_type} · {hit.entity_id}
-                  </div>
-                </button>
-              ))}
-            </div>
-          )}
         </div>
-        <label className="row" style={{ gap: 'var(--space-2)' }}>
-          <span className="muted">Degree</span>
-          <InfoTooltip text="How far apart two people can be. 1 = they share something directly (a phone, an address, an employer). 2 = a friend of a friend. 3 = one step further out." />
-          <select
-            className="select"
-            style={{ width: 110 }}
-            value={degree}
-            onChange={(e) => handleDegreeChange(Number(e.target.value))}
-          >
-            <option value={1}>1 degree</option>
-            <option value={2}>2 degrees</option>
-            <option value={3}>3 degrees</option>
-          </select>
-        </label>
-        <label className="row" style={{ gap: 'var(--space-2)' }}>
-          <span className="muted">Min confidence</span>
-          <InfoTooltip text="How sure the link has to be before it counts. A value only these two people share scores high; one that forty people share scores near zero. Raising this also hides people you could only reach through a weak link." />
-          <input
-            type="range"
-            min={0}
-            max={1}
-            step={0.05}
-            value={minConfidence}
-            onChange={(e) => setMinConfidence(Number(e.target.value))}
-            // One request per drag, not one per step.
-            onPointerUp={() => {
-              if (rootId) void loadNetwork(rootId, degree, { preserveExpanded: true })
-            }}
-            aria-label="Minimum link confidence"
-          />
-          <span className="muted" style={{ width: 32 }}>
-            {minConfidence.toFixed(2)}
-          </span>
-        </label>
+        {mode === 'explore' ? (
+          <>
+            <div className="explorer-topbar__search" style={{ position: 'relative' }}>
+              <div className="row" style={{ gap: 'var(--space-1)' }}>
+                <div className="search-input-wrap">
+                  <Search className="search-input-wrap__icon" size={14} />
+                  <input
+                    className="input input--search"
+                    placeholder="Search for a person…"
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
+                  />
+                </div>
+                <button className="btn btn--primary btn-sm" onClick={handleSearch}>
+                  Search
+                </button>
+              </div>
+              {searchResults.length > 0 && (
+                <div className="card search-dropdown">
+                  {searchResults.map((hit) => (
+                    <button
+                      key={hit.entity_id}
+                      className="list-item"
+                      onClick={() => handleSelectResult(hit)}
+                    >
+                      <strong>{hit.label || hit.entity_id}</strong>
+                      <div className="mono muted">
+                        {hit.entity_type} · {hit.entity_id}
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+            <label className="row" style={{ gap: 'var(--space-2)' }}>
+              <span className="muted">Degree</span>
+              <InfoTooltip text="How far apart two people can be. 1 = they share something directly (a phone, an address, an employer). 2 = a friend of a friend. 3 = one step further out." />
+              <select
+                className="select"
+                style={{ width: 110 }}
+                value={degree}
+                onChange={(e) => handleDegreeChange(Number(e.target.value))}
+              >
+                <option value={1}>1 degree</option>
+                <option value={2}>2 degrees</option>
+                <option value={3}>3 degrees</option>
+              </select>
+            </label>
+            <label className="row" style={{ gap: 'var(--space-2)' }}>
+              <span className="muted">Min confidence</span>
+              <InfoTooltip text="How sure the link has to be before it counts. A value only these two people share scores high; one that forty people share scores near zero. Raising this also hides people you could only reach through a weak link." />
+              <input
+                type="range"
+                min={0}
+                max={1}
+                step={0.05}
+                value={minConfidence}
+                onChange={(e) => setMinConfidence(Number(e.target.value))}
+                // One request per drag, not one per step.
+                onPointerUp={() => {
+                  if (rootId) void loadNetwork(rootId, degree, { preserveExpanded: true })
+                }}
+                aria-label="Minimum link confidence"
+              />
+              <span className="muted" style={{ width: 32 }}>
+                {minConfidence.toFixed(2)}
+              </span>
+            </label>
+          </>
+        ) : (
+          <div className="row" style={{ gap: 'var(--space-3)', flex: 1 }}>
+            <PersonSearchField
+              label="Person A"
+              placeholder="Search for a person…"
+              selected={personA}
+              onSelect={setPersonA}
+            />
+            <PersonSearchField
+              label="Person B"
+              placeholder="Search for a person…"
+              selected={personB}
+              onSelect={setPersonB}
+            />
+            <button
+              className="btn btn--primary btn-sm"
+              disabled={!personA || !personB || connectionLoading}
+              onClick={handleFindConnection}
+            >
+              {connectionLoading ? 'Searching…' : 'Find connection'}
+            </button>
+          </div>
+        )}
       </div>
 
-      {(status || searchError || graph.error) && (
+      {mode === 'explore' && (status || searchError || graph.error) && (
         <div className="status-strip">{graph.error ?? searchError ?? status}</div>
       )}
+      {mode === 'connect' && connectionError && <div className="status-strip">{connectionError}</div>}
       {notice.map((line) => (
         <div className="status-strip" key={line}>
           {line}
@@ -396,6 +469,25 @@ export function InvestigationGraphPage() {
       ))}
 
       <div className="explorer-body">
+        {mode === 'connect' ? (
+          connectionResult && personA && personB ? (
+            <ConnectionChainView
+              sourceLabel={personA.label || personA.entity_id}
+              targetLabel={personB.label || personB.entity_id}
+              result={connectionResult}
+              onExplore={(personId) => void handleExploreFromConnection(personId)}
+            />
+          ) : (
+            <div className="panel" style={{ margin: 'var(--space-4)' }}>
+              <h3>Verify a connection</h3>
+              <p className="text-secondary">
+                Pick two people above and choose "Find connection" to see the strongest chain
+                linking them — or confirm they aren't connected at all.
+              </p>
+            </div>
+          )
+        ) : (
+        <>
         <div className="explorer-center">
           {view === '2d' ? (
             <GraphCanvas
@@ -479,6 +571,8 @@ export function InvestigationGraphPage() {
             risk={risk}
           />
         </div>
+        </>
+        )}
       </div>
     </main>
   )
