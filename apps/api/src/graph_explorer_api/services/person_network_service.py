@@ -14,6 +14,8 @@ breadth-first search over that projection, not over raw hops.
 
 from __future__ import annotations
 
+import heapq
+import math
 from collections import defaultdict
 from typing import Callable, NamedTuple
 
@@ -91,6 +93,11 @@ DEFAULT_MAX_FANOUT = 25
 DEFAULT_MAX_PERSONS = 300
 MAX_DEGREE = 3
 
+# find_connection searches one degree past the public exploration ceiling —
+# a deliberate "are these two connected" question can afford to look
+# slightly further than casual browsing. Not exposed as an API parameter.
+MAX_CONNECTION_DEGREE = 4
+
 _FETCH_CHUNK = 200
 
 
@@ -121,13 +128,19 @@ class PersonNetworkService:
         min_confidence: float = 0.0,
         max_fanout: int = DEFAULT_MAX_FANOUT,
         max_persons: int = DEFAULT_MAX_PERSONS,
+        max_degree_cap: int = MAX_DEGREE,
     ) -> dict | None:
         """Persons within `degree` connections of `root_id`, and why.
 
         Returns None when the root doesn't exist or isn't a person — the
         router turns that into a 404.
+
+        `max_degree_cap` overrides the degree ceiling for internal callers
+        that need to look further than the public API allows (see
+        `find_connection`). The router never passes it, so every request
+        that comes in through `/person-network` still clamps to MAX_DEGREE.
         """
-        degree = max(1, min(int(degree), MAX_DEGREE))
+        degree = max(1, min(int(degree), max_degree_cap))
         edges = self._resolve_connectors(connectors)
 
         root = self._fetch_vertices([root_id]).get(root_id)
@@ -198,6 +211,56 @@ class PersonNetworkService:
                 "direct": list(edges.direct),
                 "shared": list(edges.shared),
                 "bridge": list(edges.bridge),
+            },
+        }
+
+    def find_connection(
+        self, source_id: str, target_id: str, max_degree: int = MAX_CONNECTION_DEGREE
+    ) -> dict | None:
+        """The strongest chain connecting two people, if any, within
+        `max_degree` hops of `source_id`.
+
+        "Strongest" maximizes the product of each hop's confidence (ties
+        broken by fewest hops) — see `_strongest_path`.
+
+        Returns None when `source_id` isn't a person (the router 404s).
+        Returns `{"error": ...}` for a same-person request or an unknown/
+        non-person target — the router turns those into 400s, distinct from
+        a legitimate "not connected" answer.
+        """
+        if source_id == target_id:
+            return {"error": "same_person"}
+
+        target_vertex = self._fetch_vertices([target_id]).get(target_id)
+        if target_vertex is None or PERSON_TAG not in target_vertex.tags:
+            return {"error": "target_not_found"}
+
+        network = self.person_network(
+            source_id, degree=max_degree, max_degree_cap=max_degree
+        )
+        if network is None:
+            return None
+
+        persons_by_id = {p["id"]: p for p in network["persons"]}
+        if target_id not in persons_by_id:
+            return {
+                "connected": False,
+                "source_id": source_id,
+                "target_id": target_id,
+                "max_degree_searched": max_degree,
+            }
+
+        path_ids, path_links, confidence = _strongest_path(
+            source_id, target_id, network["links"]
+        )
+        return {
+            "connected": True,
+            "source_id": source_id,
+            "target_id": target_id,
+            "path": {
+                "persons": [persons_by_id[vid] for vid in path_ids],
+                "links": path_links,
+                "confidence": confidence,
             },
         }
 
@@ -664,3 +727,61 @@ def _finalize_link(link: dict) -> dict:
     else:
         label = f"{len(via)} connections"
     return {**link, "label": label, "confidence": round(_link_confidence(via), 4)}
+
+
+def _strongest_path(
+    source_id: str, target_id: str, links: list[dict]
+) -> tuple[list[str], list[dict], float]:
+    """Dijkstra over `links` (already-finalized person_network links, each
+    carrying a `confidence` in (0, 1]), weighted to maximize the product of
+    hop confidences — equivalently minimize the sum of -log(confidence).
+    Ties (equal weight) prefer fewer hops, via the second element of the
+    priority tuple.
+
+    `links` is undirected: a link's `source`/`target` order is whichever
+    the projection discovered first, not a direction. `target_id` must be
+    reachable from `source_id` through `links` — the caller only calls this
+    after confirming target_id is among the persons the same BFS produced.
+    """
+    adjacency: dict[str, list[dict]] = defaultdict(list)
+    for link in links:
+        adjacency[link["source"]].append(link)
+        adjacency[link["target"]].append(link)
+
+    best: dict[str, tuple[float, int]] = {source_id: (0.0, 0)}
+    came_from: dict[str, tuple[str, dict]] = {}
+    visited: set[str] = set()
+    frontier: list[tuple[float, int, str]] = [(0.0, 0, source_id)]
+
+    while frontier:
+        weight, hops, current = heapq.heappop(frontier)
+        if current in visited:
+            continue
+        visited.add(current)
+        if current == target_id:
+            break
+
+        for link in adjacency[current]:
+            neighbor = link["target"] if link["source"] == current else link["source"]
+            if neighbor in visited:
+                continue
+            confidence = max(float(link["confidence"]), 1e-9)
+            candidate = (weight - math.log(confidence), hops + 1)
+            if neighbor not in best or candidate < best[neighbor]:
+                best[neighbor] = candidate
+                came_from[neighbor] = (current, link)
+                heapq.heappush(frontier, (candidate[0], candidate[1], neighbor))
+
+    path_ids = [target_id]
+    path_links: list[dict] = []
+    node = target_id
+    while node != source_id:
+        prev, link = came_from[node]
+        path_links.append(link)
+        path_ids.append(prev)
+        node = prev
+    path_ids.reverse()
+    path_links.reverse()
+
+    total_weight, _ = best[target_id]
+    return path_ids, path_links, math.exp(-total_weight)

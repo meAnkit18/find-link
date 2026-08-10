@@ -815,3 +815,119 @@ def test_matching_field_names_the_source_documents():
     )
     via = service.person_network("a", degree=1)["links"][0]["via"][0]
     assert via["document_ids"] == ["doc:a", "doc:b"]
+
+
+# ------------------------------------------------------- connection finder
+
+
+def test_find_connection_returns_the_direct_link(shared_phone):
+    result = shared_phone.find_connection("a", "b")
+    assert result["connected"] is True
+    assert [p["id"] for p in result["path"]["persons"]] == ["a", "b"]
+    assert len(result["path"]["links"]) == 1
+    assert result["path"]["confidence"] == pytest.approx(0.8)
+
+
+def test_find_connection_walks_a_multi_hop_chain(chain):
+    result = chain.find_connection("a", "d")
+    assert result["connected"] is True
+    assert [p["id"] for p in result["path"]["persons"]] == ["a", "b", "c", "d"]
+    assert len(result["path"]["links"]) == 3
+
+
+def test_find_connection_reports_not_connected():
+    service = make_service(
+        {"a": person("Alice"), "b": person("Bob")},
+        [],
+    )
+    result = service.find_connection("a", "b")
+    assert result == {
+        "connected": False,
+        "source_id": "a",
+        "target_id": "b",
+        "max_degree_searched": 4,
+    }
+
+
+def test_find_connection_looks_one_degree_past_the_exploration_cap():
+    """A 4-hop chain is out of reach for person_network's own degree=3 cap,
+    but find_connection's default of 4 should still find it."""
+    service = make_service(
+        {
+            "a": person("Alice"),
+            "b": person("Bob"),
+            "c": person("Carol"),
+            "d": person("Dan"),
+            "e": person("Eve"),
+            "phone:1": thing("phone", "+91-111"),
+            "phone:2": thing("phone", "+91-222"),
+            "phone:3": thing("phone", "+91-333"),
+            "phone:4": thing("phone", "+91-444"),
+        },
+        [
+            ("a", "phone:1", "HAS_PHONE"),
+            ("b", "phone:1", "HAS_PHONE"),
+            ("b", "phone:2", "HAS_PHONE"),
+            ("c", "phone:2", "HAS_PHONE"),
+            ("c", "phone:3", "HAS_PHONE"),
+            ("d", "phone:3", "HAS_PHONE"),
+            ("d", "phone:4", "HAS_PHONE"),
+            ("e", "phone:4", "HAS_PHONE"),
+        ],
+    )
+    assert "e" not in {p["id"] for p in service.person_network("a", degree=3)["persons"]}
+    result = service.find_connection("a", "e")
+    assert result["connected"] is True
+    assert [p["id"] for p in result["path"]["persons"]] == ["a", "b", "c", "d", "e"]
+
+
+def test_find_connection_prefers_the_stronger_of_two_equal_length_routes():
+    """a-b-target is a weak city match then a direct edge; a-c-target is a
+    strong passport match then the same kind of direct edge. Both routes are
+    2 hops; the stronger (passport) route should win."""
+    service = make_service(
+        {
+            "a": person("Alice"),
+            "b": person("Bob"),
+            "c": person("Carol"),
+            "target": person("Target"),
+            "value:city": value_node("dubai"),
+            "value:pp": value_node("p1234567"),
+        },
+        [
+            ("a", "value:city", FIELD_VALUE, {"field_key": "city"}),
+            ("b", "value:city", FIELD_VALUE, {"field_key": "city"}),
+            ("b", "target", "RELATED_TO"),
+            ("a", "value:pp", FIELD_VALUE, {"field_key": "passport_number"}),
+            ("c", "value:pp", FIELD_VALUE, {"field_key": "passport_number"}),
+            ("c", "target", "RELATED_TO"),
+        ],
+    )
+    result = service.find_connection("a", "target")
+    assert result["connected"] is True
+    assert [p["id"] for p in result["path"]["persons"]] == ["a", "c", "target"]
+
+
+def test_find_connection_rejects_the_same_person(shared_phone):
+    assert shared_phone.find_connection("a", "a") == {"error": "same_person"}
+
+
+def test_find_connection_rejects_an_unknown_target(shared_phone):
+    assert shared_phone.find_connection("a", "nobody") == {"error": "target_not_found"}
+
+
+def test_find_connection_rejects_a_non_person_target(shared_phone):
+    assert shared_phone.find_connection("a", "phone:1") == {"error": "target_not_found"}
+
+
+def test_find_connection_returns_none_for_an_unknown_source(shared_phone):
+    assert shared_phone.find_connection("nobody", "a") is None
+
+
+def test_person_network_max_degree_cap_extends_past_max_degree(chain):
+    """Internal callers (find_connection) can look further than the public
+    API's degree ceiling; the router never passes this, so MAX_DEGREE=3
+    keeps capping every request that doesn't set it explicitly."""
+    network = chain.person_network("a", degree=4, max_degree_cap=4)
+    assert network["degree"] == 4
+    assert chain.person_network("a", degree=9)["degree"] == 3
