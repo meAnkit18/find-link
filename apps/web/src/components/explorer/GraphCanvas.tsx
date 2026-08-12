@@ -230,6 +230,26 @@ const STYLE: StylesheetStyle[] = [
   },
 ]
 
+/** Opt-in override for callers whose graph is small enough that the hop
+ * reasons should always be readable. The rule above hides them because a
+ * dense network of labels is unreadable — but a connection path is a
+ * handful of edges that exist precisely to state why they exist, and
+ * making the investigator hover each one to find out defeats the view.
+ *
+ * Appended after the base rules, and touches only label visibility — the
+ * hover and selection rules own line colour and width, so highlighting
+ * still reads exactly as it does on Explore. */
+const ALWAYS_LABEL_EDGES: StylesheetStyle[] = [
+  {
+    selector: 'edge',
+    style: {
+      'text-opacity': 1,
+      'text-background-opacity': 0.85,
+      'font-size': 9,
+    },
+  },
+]
+
 // cy.fit() scales until the content fills the viewport, which on a
 // three-node result means ~600% — labels the size of the canvas, and no
 // room left for the nodes an expansion is about to add. Cap it.
@@ -366,6 +386,10 @@ interface Props {
   /** Fired on every node tap. The caller decides expand vs. collapse based
    * on its own expanded-state tracking (single click toggles both). */
   onToggleExpand: (vid: string) => void
+  /** Show every edge's label without hovering. For small, deliberately
+   * chosen graphs (the connection path); read once when the canvas is
+   * created, so it is a per-mount option rather than a live toggle. */
+  alwaysLabelEdges?: boolean
   onZoomChange?: (zoom: number) => void
   /** Nodes the caller places itself — Investigation's radial attribute
    * rings. These are excluded from the force layout, though still
@@ -395,6 +419,7 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas(
     onSelectEdge,
     selectedEdge,
     onToggleExpand,
+    alwaysLabelEdges = false,
     onZoomChange,
     pinnedPositions,
     onParentMoved,
@@ -461,7 +486,7 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas(
     if (!containerRef.current) return
     const cy = cytoscape({
       container: containerRef.current,
-      style: STYLE,
+      style: alwaysLabelEdges ? [...STYLE, ...ALWAYS_LABEL_EDGES] : STYLE,
       wheelSensitivity: 0.2,
       pixelRatio: 1,
       // NOTE: textureOnViewport was removed on purpose — it causes blank /

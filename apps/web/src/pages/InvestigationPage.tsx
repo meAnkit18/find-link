@@ -2,9 +2,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { Position } from 'cytoscape'
 import { Search } from 'lucide-react'
 import { api } from '../api/client'
-import type { ConnectionResult, EntitySearchHit, RiskResult } from '../api/types'
+import type { ConnectionResult, EntitySearchHit, PersonLink, RiskResult } from '../api/types'
 import InfoTooltip from '../components/common/InfoTooltip'
+import ConnectionBrief from '../components/explorer/connection/ConnectionBrief'
 import ConnectionChainView from '../components/explorer/connection/ConnectionChainView'
+import ConnectionDetailPanel from '../components/explorer/connection/ConnectionDetailPanel'
 import PersonSearchField from '../components/explorer/connection/PersonSearchField'
 import GraphCanvas, { type GraphCanvasHandle } from '../components/explorer/GraphCanvas'
 import GraphCanvas3D from '../components/explorer/GraphCanvas3D'
@@ -58,6 +60,10 @@ export function InvestigationGraphPage() {
   const [connectionResult, setConnectionResult] = useState<ConnectionResult | null>(null)
   const [connectionLoading, setConnectionLoading] = useState(false)
   const [connectionError, setConnectionError] = useState<string | null>(null)
+  // Kept apart from Explore's `selection`: the two modes describe different
+  // graphs, so carrying a selection across would point the panel at a
+  // person the other mode isn't showing.
+  const [connectionSelection, setConnectionSelection] = useState<Selection | null>(null)
 
   const [rootId, setRootId] = useState<string | null>(null)
   // One selection covers all three kinds of subject the panel describes, so
@@ -183,6 +189,7 @@ export function InvestigationGraphPage() {
     setConnectionLoading(true)
     setConnectionError(null)
     setConnectionResult(null)
+    setConnectionSelection(null)
     try {
       setConnectionResult(await api.findConnection(personA.entity_id, personB.entity_id))
     } catch (err) {
@@ -332,6 +339,52 @@ export function InvestigationGraphPage() {
     ],
   )
 
+  /** The same `DetailData` contract Explore builds from the canvas, over
+   * the connection result instead — which is what lets the connection panel
+   * reuse `LinkDetail` and the reason cards unchanged.
+   *
+   * The attribute caches stay empty on purpose: this mode never fans a
+   * person's documents out, so nothing has fetched them. `describeLink`
+   * already degrades to the projection's own normalised value when no
+   * citing document is loaded, and `labelFor` returning null is exactly how
+   * `ReasonCard` decides to render a source as an inert chip rather than a
+   * dead link. */
+  const connectionData = useMemo<DetailData>(() => {
+    const path = connectionResult?.connected ? connectionResult.path : null
+    const persons = path?.persons ?? []
+    const links = path?.links ?? []
+    const linksByPerson = new Map<string, PersonLink[]>()
+    for (const link of links) {
+      for (const personId of [link.source, link.target]) {
+        const existing = linksByPerson.get(personId)
+        if (existing) existing.push(link)
+        else linksByPerson.set(personId, [link])
+      }
+    }
+    return {
+      personsById: new Map(persons.map((person) => [person.id, person])),
+      links,
+      linksByPerson,
+      attributes: new Map(),
+      attributesById: new Map(),
+      expanded: new Set(),
+      loadingAttributes: new Set(),
+      fieldMatches: buildFieldMatchIndex(links),
+      rootLabel: persons[0]?.label ?? 'the source',
+    }
+  }, [connectionResult])
+
+  const connectionActions: DetailActions = {
+    select: setConnectionSelection,
+    // Every vid the connection panel can hand back is a person on the path:
+    // its reason chips for anything else are inert (see `labelFor`).
+    openVid: (vid) => setConnectionSelection({ kind: 'person', id: vid }),
+    labelFor: (vid) => connectionData.personsById.get(vid)?.label ?? null,
+    // Nothing to expand — this mode draws the path, not a canvas.
+    toggleExpand: () => {},
+    fetchRisk: (personId) => void fetchRisk(personId),
+  }
+
   // Rebuilt every render on purpose: these close over state the panel has to
   // see fresh (the expanded set), and the panel isn't memoized, so a stable
   // identity would buy nothing and could only go stale.
@@ -434,7 +487,7 @@ export function InvestigationGraphPage() {
             </label>
           </>
         ) : (
-          <div className="row" style={{ gap: 'var(--space-3)', flex: 1 }}>
+          <div className="connection-query">
             <PersonSearchField
               label="Person A"
               placeholder="Search for a person…"
@@ -471,20 +524,47 @@ export function InvestigationGraphPage() {
       <div className="explorer-body">
         {mode === 'connect' ? (
           connectionResult && personA && personB ? (
-            <ConnectionChainView
-              sourceLabel={personA.label || personA.entity_id}
-              targetLabel={personB.label || personB.entity_id}
-              result={connectionResult}
-              onExplore={(personId) => void handleExploreFromConnection(personId)}
-            />
+            <>
+              <ConnectionChainView
+                sourceLabel={personA.label || personA.entity_id}
+                targetLabel={personB.label || personB.entity_id}
+                result={connectionResult}
+                selection={connectionSelection}
+                onSelect={setConnectionSelection}
+              />
+
+              {detailPanel.isDesktop && (
+                <div
+                  className="resize-handle"
+                  role="separator"
+                  aria-orientation="vertical"
+                  aria-label="Resize detail panel"
+                  {...detailPanel.handleProps}
+                />
+              )}
+
+              <div
+                className="explorer-right"
+                style={detailPanel.isDesktop ? { width: detailPanel.width } : undefined}
+              >
+                <ConnectionDetailPanel
+                  result={connectionResult}
+                  sourceLabel={personA.label || personA.entity_id}
+                  targetLabel={personB.label || personB.entity_id}
+                  selection={connectionSelection}
+                  data={connectionData}
+                  actions={connectionActions}
+                  risk={risk}
+                  onExplore={(personId) => void handleExploreFromConnection(personId)}
+                />
+              </div>
+            </>
           ) : (
-            <div className="panel" style={{ margin: 'var(--space-4)' }}>
-              <h3>Verify a connection</h3>
-              <p className="text-secondary">
-                Pick two people above and choose "Find connection" to see the strongest chain
-                linking them — or confirm they aren't connected at all.
-              </p>
-            </div>
+            <ConnectionBrief
+              personA={personA}
+              personB={personB}
+              loading={connectionLoading}
+            />
           )
         ) : (
         <>

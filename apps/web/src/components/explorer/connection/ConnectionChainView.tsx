@@ -1,27 +1,45 @@
-import type { ConnectionResult, PersonNode } from '../../../api/types'
-import { describeLink } from '../detail/detailModel'
-import ReasonCard from '../detail/ReasonCard'
-import { Callout, ConfidenceMeter } from '../detail/parts'
+import { useMemo, useRef } from 'react'
+import type { ConnectionResult } from '../../../api/types'
+import type { Selection } from '../detail/detailModel'
+import { Callout } from '../detail/parts'
+import GraphCanvas, { type GraphCanvasHandle } from '../GraphCanvas'
+import { PERSON_TAG } from '../../../hooks/usePersonNetworkState'
+import { pathToElements } from './connectionGraphElements'
+
+const MAIN_TAGS = new Set([PERSON_TAG])
 
 interface Props {
   sourceLabel: string
   targetLabel: string
   result: ConnectionResult
-  onExplore: (personId: string) => void
+  selection: Selection | null
+  onSelect: (selection: Selection | null) => void
 }
 
-// The chain view has no canvas/detail-panel selection framework behind it,
-// so a reason's connector/document chips render as inert labels here —
-// the same fallback ReasonCard already uses for a node the screen doesn't
-// know about (see its `labelFor` contract).
-const noLabel = () => null
-const noOpen = () => {}
+/** The graph half of the answer to "are these two people connected, and
+ * why". The reasoning behind any one person or hop lives in the detail
+ * panel beside it — this is the shape of the path, not the evidence for it.
+ *
+ * Drawn on the same cytoscape canvas Explore uses, fed by
+ * `pathToElements`: a hop between two people should look the same whether
+ * you arrived at it by exploring outward or by asking about two names, and
+ * the shared canvas is what guarantees that rather than a second renderer
+ * kept in sync by hand. */
+export default function ConnectionChainView({
+  sourceLabel,
+  targetLabel,
+  result,
+  selection,
+  onSelect,
+}: Props) {
+  const canvasRef = useRef<GraphCanvasHandle>(null)
+  const path = result.connected ? result.path : null
 
-/** The answer to "are these two people connected, and why" — a plain,
- * standalone chain, independent of the canvas. Reuses `describeLink` and
- * `ReasonCard` unchanged, so each hop reads exactly like an entry in the
- * Connections tab. */
-export default function ConnectionChainView({ sourceLabel, targetLabel, result, onExplore }: Props) {
+  const elements = useMemo(
+    () => pathToElements(path?.persons ?? [], path?.links ?? []),
+    [path],
+  )
+
   if (!result.connected) {
     return (
       <div className="connection-chain">
@@ -34,56 +52,32 @@ export default function ConnectionChainView({ sourceLabel, targetLabel, result, 
     )
   }
 
-  const { persons, links, confidence } = result.path
-  const personsById = new Map(persons.map((p) => [p.id, p]))
-
   return (
-    <div className="connection-chain">
-      <div className="connection-chain__summary">
-        <h3>
-          {sourceLabel} → {targetLabel}
-        </h3>
-        <ConfidenceMeter value={confidence} label="Overall connection" />
-      </div>
-
-      {persons.map((person, i) => (
-        <div className="connection-chain__hop" key={person.id}>
-          <PersonRow person={person} isEndpoint={i === 0 || i === persons.length - 1} onExplore={onExplore} />
-          {links[i] && (
-            <div className="connection-chain__reasons">
-              {describeLink(links[i], new Map(), personsById).map((descriptor, j) => (
-                <ReasonCard key={j} descriptor={descriptor} labelFor={noLabel} onOpen={noOpen} />
-              ))}
-            </div>
-          )}
-        </div>
-      ))}
-    </div>
-  )
-}
-
-function PersonRow({
-  person,
-  isEndpoint,
-  onExplore,
-}: {
-  person: PersonNode
-  isEndpoint: boolean
-  onExplore: (personId: string) => void
-}) {
-  return (
-    <div className="connection-chain__person">
-      <div>
-        <strong>{person.label}</strong>
-        {!isEndpoint && (
-          <span className="badge" style={{ marginLeft: 8 }}>
-            via
-          </span>
-        )}
-      </div>
-      <button className="btn btn-sm" onClick={() => onExplore(person.id)}>
-        Explore this person
-      </button>
+    // `explorer-center` rather than a class of its own: this is the same
+    // canvas in the same slot Explore puts it in, including the mobile
+    // min-height rule that stops a flex canvas collapsing to nothing.
+    <div className="explorer-center">
+      <GraphCanvas
+        ref={canvasRef}
+        nodes={elements.nodes}
+        edges={elements.edges}
+        selectedVid={selection?.kind === 'person' ? selection.id : null}
+        rootVid={result.source_id}
+        mainTags={MAIN_TAGS}
+        onSelect={(vid) => onSelect(vid ? { kind: 'person', id: vid } : null)}
+        onSelectEdge={(source, target) => onSelect({ kind: 'link', source, target })}
+        selectedEdge={
+          selection?.kind === 'link'
+            ? { source: selection.source, target: selection.target }
+            : null
+        }
+        // Nothing to fan out: this mode projects a path between two people,
+        // not a person's own attributes, so a tap selects and never expands.
+        onToggleExpand={() => {}}
+        // A path is a few edges that exist to state their own reason, so
+        // the hop labels stay on rather than waiting for a hover.
+        alwaysLabelEdges
+      />
     </div>
   )
 }
